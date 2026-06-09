@@ -3,5 +3,5 @@ mercadopago==2.2.0
 flask==3.0.3
 requests==2.32.3
 gunicorn==22.0.0
-pyotp==4.2.0
+pyotp
 python-dotenv==1.0.1
