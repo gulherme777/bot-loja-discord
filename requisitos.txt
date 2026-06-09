@@ -1,0 +1,7 @@
+discord.py
+mercadopago
+flask
+Pillow
+requests
+gunicorn
+pyotp
