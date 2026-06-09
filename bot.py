@@ -13,14 +13,14 @@ from datetime import datetime
 from io import BytesIO
 import pyotp
 
-print("🔧 Iniciando bot da NOVA LOJA...")
+print("🔧 Iniciando bot da G7 STORE...")
 
 # ===============================
 # CONFIG (TUDO VIA VARIÁVEIS DE AMBIENTE)
 # ===============================
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")  # ← AGORA PEGA DO .ENV
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
 
 ARQUIVO_PRODUTO = "produto.txt"
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
@@ -32,13 +32,10 @@ if os.path.exists(ARQUIVO_PRODUTO):
 else:
     print("⚠️ produto.txt não encontrado (opcional)")
 
-# ========== CONFIGURAÇÕES DA LOJA (VOCÊ VAI PREENCHER DEPOIS) ==========
+# ========== CONFIGURAÇÕES DA LOJA (VOCÊ PREENCHE AQUI) ==========
 GUILD_ID = 1513768859838971924
-
-
 CANAL_CARRINHOS = 1513770446158303304
 CANAL_PAGOS = 1513770547933089852
-
 MEU_ID = 1431125477069688953
 CARGO_ADMIN = 1431125477069688953
 
@@ -335,9 +332,8 @@ class Bot(discord.Client):
             print("✅ Slash commands sincronizados globalmente")
 
     async def on_ready(self):
-        print(f"🟢 Logado como {self.user} - NOVA LOJA!")
+        print(f"🟢 Logado como {self.user} - G7 STORE!")
         
-        # Mensagem de boas-vindas no console
         print(f"📊 Estatísticas:")
         print(f"   - Produtos: {len(produtos_disponiveis)}")
         print(f"   - Comandos sincronizados: {len(self.tree.get_commands())}")
@@ -613,6 +609,51 @@ async def ver_estoque(interaction: discord.Interaction, produto_id: str, variaca
         print(f"❌ Erro ao ver estoque: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
+@bot.tree.command(name="remover_estoque", description="[ADMIN] Remover item específico do estoque")
+@app_commands.describe(
+    produto_id="ID do produto",
+    indice="Índice do item (veja com /ver_estoque)",
+    variacao="Nome da variação (opcional)"
+)
+async def remover_estoque(
+    interaction: discord.Interaction,
+    produto_id: str,
+    indice: int,
+    variacao: str = None
+):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in estoque_disponivel:
+            await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+        
+        with estoque_lock:
+            if variacao:
+                if variacao not in estoque_disponivel[produto_id].get("variacoes", {}):
+                    await interaction.response.send_message(f"❌ Variação `{variacao}` não encontrada!", ephemeral=True)
+                    return
+                lista = estoque_disponivel[produto_id]["variacoes"][variacao]
+                if indice < 0 or indice >= len(lista):
+                    await interaction.response.send_message(f"❌ Índice inválido! Use 0 a {len(lista)-1}", ephemeral=True)
+                    return
+                removido = lista.pop(indice)
+                salvar_estoque(estoque_disponivel)
+                await interaction.response.send_message(f"✅ Item removido: `{removido}`", ephemeral=True)
+            else:
+                lista = estoque_disponivel[produto_id].get("itens", [])
+                if indice < 0 or indice >= len(lista):
+                    await interaction.response.send_message(f"❌ Índice inválido! Use 0 a {len(lista)-1}", ephemeral=True)
+                    return
+                removido = lista.pop(indice)
+                salvar_estoque(estoque_disponivel)
+                await interaction.response.send_message(f"✅ Item removido: `{removido}`", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao remover estoque: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
 # ===============================
 # COMANDOS DE ADMIN - VARIAÇÕES
 # ===============================
@@ -763,4 +804,738 @@ async def remover_variacao(
             await interaction.response.send_message(f"❌ Índice inválido! Use 0 a {len(variacoes)-1}", ephemeral=True)
             return
         
-        removida
+        removida = variacoes.pop(indice)
+        salvar_produtos(produtos_disponiveis)
+        
+        await interaction.response.send_message(
+            f"✅ Variação removida!\n\n"
+            f"📦 Produto: {produtos_disponiveis[produto_id]['nome']}\n"
+            f"🎮 Opção removida: {removida['nome']}\n"
+            f"💰 Preço: R$ {removida['preco']:.2f}",
+            ephemeral=True
+        )
+    except Exception as e:
+        print(f"❌ Erro ao remover variação: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+# ===============================
+# COMANDOS DE ADMIN (GERENCIAMENTO BASE)
+# ===============================
+
+@bot.tree.command(name="criar_produto", description="[ADMIN] Criar um novo produto")
+@app_commands.describe(
+    id="ID único do produto",
+    nome="Nome do produto",
+    preco="Preço em R$",
+    descricao="Descrição do produto (use | para separar benefícios)",
+    tipo="Tipo: auto ou manual"
+)
+async def criar_produto(
+    interaction: discord.Interaction,
+    id: str,
+    nome: str,
+    preco: float,
+    descricao: str,
+    tipo: str = "auto"
+):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if id in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto com ID `{id}` já existe!", ephemeral=True)
+            return
+        
+        if tipo not in ["auto", "manual"]:
+            await interaction.response.send_message("❌ Tipo deve ser `auto` ou `manual`", ephemeral=True)
+            return
+        
+        produtos_disponiveis[id] = {
+            "nome": nome,
+            "preco": preco,
+            "descricao": descricao,
+            "tipo": tipo,
+            "imagem": "",
+            "variacoes": []
+        }
+        salvar_produtos(produtos_disponiveis)
+        
+        if id not in estoque_disponivel:
+            estoque_disponivel[id] = {"itens": [], "variacoes": {}}
+            salvar_estoque(estoque_disponivel)
+        
+        tipo_texto = "🤖 Entrega automática" if tipo == "auto" else "👨‍💼 Entrega manual"
+        
+        await interaction.response.send_message(
+            f"✅ Produto criado!\n\n📦 ID: `{id}`\n📝 Nome: {nome}\n💰 Preço: R$ {preco:.2f}\n🎮 Tipo: {tipo_texto}\n\n💡 Use `/add_estoque` para adicionar itens!\n💡 Use `/add_variacao` para adicionar opções!\n💡 Use `/configurar_produto {id} {id}` para criar o canal!",
+            ephemeral=True
+        )
+    except Exception as e:
+        print(f"❌ Erro ao criar produto: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="editar_preco", description="[ADMIN] Alterar preço de um produto")
+@app_commands.describe(
+    produto_id="ID do produto",
+    novo_preco="Novo preço em R$"
+)
+async def editar_preco(interaction: discord.Interaction, produto_id: str, novo_preco: float):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto não encontrado!", ephemeral=True)
+            return
+        
+        produto = produtos_disponiveis[produto_id]
+        preco_antigo = produto["preco"]
+        produto["preco"] = novo_preco
+        salvar_produtos(produtos_disponiveis)
+        
+        await interaction.response.send_message(
+            f"✅ Preço atualizado!\n📦 Produto: {produto['nome']}\n📉 Antigo: R$ {preco_antigo:.2f}\n📈 Novo: R$ {novo_preco:.2f}",
+            ephemeral=True
+        )
+    except Exception as e:
+        print(f"❌ Erro ao editar preço: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="editar_produto", description="[ADMIN] Alterar nome/descrição")
+@app_commands.describe(
+    produto_id="ID do produto",
+    novo_nome="Novo nome (opcional)",
+    nova_descricao="Nova descrição (opcional)"
+)
+async def editar_produto(
+    interaction: discord.Interaction, 
+    produto_id: str, 
+    novo_nome: str = None, 
+    nova_descricao: str = None
+):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto não encontrado!", ephemeral=True)
+            return
+        
+        produto = produtos_disponiveis[produto_id]
+        mensagem = f"✅ Produto atualizado!\n\n📦 ID: `{produto_id}`\n"
+        
+        if novo_nome:
+            mensagem += f"📝 Nome: {produto['nome']} → {novo_nome}\n"
+            produto["nome"] = novo_nome
+        
+        if nova_descricao:
+            mensagem += f"📄 Descrição atualizada\n"
+            produto["descricao"] = nova_descricao
+        
+        salvar_produtos(produtos_disponiveis)
+        await interaction.response.send_message(mensagem, ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao editar produto: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="remover_produto", description="[ADMIN] Remover um produto")
+@app_commands.describe(produto_id="ID do produto")
+async def remover_produto(interaction: discord.Interaction, produto_id: str):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto não encontrado!", ephemeral=True)
+            return
+        
+        produto = produtos_disponiveis.pop(produto_id)
+        salvar_produtos(produtos_disponiveis)
+        
+        await interaction.response.send_message(f"✅ Produto removido!\n📦 Removido: {produto['nome']}", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao remover produto: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="entregar", description="[ADMIN] Entregar produto manual do estoque")
+@app_commands.describe(
+    usuario="ID do usuário",
+    produto_id="ID do produto",
+    indice="Índice do item no estoque (opcional, use /ver_estoque para ver)"
+)
+async def entregar_produto(
+    interaction: discord.Interaction, 
+    usuario: str, 
+    produto_id: str,
+    indice: int = -1
+):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        user_id = int(usuario)
+        user = await bot.fetch_user(user_id)
+        
+        if not user:
+            await interaction.followup.send("❌ Usuário não encontrado.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.followup.send(f"❌ Produto não encontrado!", ephemeral=True)
+            return
+        
+        with estoque_lock:
+            if produto_id not in estoque_disponivel:
+                estoque_disponivel[produto_id] = {"itens": [], "variacoes": {}}
+            
+            itens = estoque_disponivel[produto_id].get("itens", [])
+            
+            if not itens:
+                await interaction.followup.send(f"❌ **Estoque vazio para {produtos_disponiveis[produto_id]['nome']}!**\n\nUse `/add_estoque` para adicionar itens.", ephemeral=True)
+                return
+            
+            if indice == -1:
+                item = itens.pop(0)
+            else:
+                if indice < 0 or indice >= len(itens):
+                    await interaction.followup.send(f"❌ Índice inválido! Use 0 a {len(itens)-1} ou /ver_estoque para ver os índices.", ephemeral=True)
+                    return
+                item = itens.pop(indice)
+            
+            salvar_estoque(estoque_disponivel)
+        
+        produto = produtos_disponiveis[produto_id]
+        
+        await user.send(
+            f"🎮 **Sua {produto['nome']} chegou!**\n\n"
+            f"```{item}```\n\n"
+            "✅ Obrigado pela preferência!"
+        )
+        
+        await interaction.followup.send(f"✅ **{produto['nome']} entregue para {user.name}!**\n🔐 Item: `{item}`\n📊 Restam {len(estoque_disponivel[produto_id].get('itens', []))} itens em estoque.", ephemeral=True)
+        
+        canal_pagos = bot.get_channel(CANAL_PAGOS)
+        if canal_pagos:
+            embed = discord.Embed(
+                title="📦 PRODUTO ENTREGUE",
+                color=0x3498db,
+                timestamp=datetime.now()
+            )
+            embed.add_field(name="👤 Cliente", value=user.mention, inline=True)
+            embed.add_field(name="📦 Produto", value=produto['nome'], inline=True)
+            embed.add_field(name="🔐 Item", value=f"`{item}`", inline=False)
+            embed.set_footer(text=f"Entregue por: {interaction.user.name}")
+            await canal_pagos.send(embed=embed)
+    except ValueError:
+        await interaction.followup.send("❌ ID inválido.", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao entregar: {e}")
+        try:
+            await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
+        except:
+            pass
+
+@bot.tree.command(name="backup", description="[ADMIN] Fazer backup dos produtos")
+async def fazer_backup(interaction: discord.Interaction):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        backup_data = json.dumps(produtos_disponiveis, indent=2, ensure_ascii=False)
+        import io
+        file = discord.File(io.StringIO(backup_data), filename="backup_produtos.json")
+        
+        await interaction.response.send_message(
+            "✅ Backup realizado! Guarde este arquivo.",
+            file=file,
+            ephemeral=True
+        )
+    except Exception as e:
+        print(f"❌ Erro ao fazer backup: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="configurar_produto", description="[ADMIN] Criar/atualizar canal de um produto")
+@app_commands.describe(
+    produto_id="ID do produto",
+    nome_canal="Nome do canal"
+)
+async def configurar_produto(
+    interaction: discord.Interaction,
+    produto_id: str,
+    nome_canal: str
+):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.followup.send(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+        
+        produto_info = produtos_disponiveis[produto_id]
+        guild = interaction.guild
+        
+        canal = discord.utils.get(guild.channels, name=nome_canal)
+        if not canal:
+            canal = await guild.create_text_channel(nome_canal)
+        
+        embed = discord.Embed(
+            title=f"🛒 {produto_info['nome']}",
+            description=produto_info['descricao'],
+            color=0xffa500
+        )
+        embed.add_field(name="💰 Preço", value=f"R$ {produto_info['preco']:.2f}", inline=True)
+        embed.set_footer(text="G7 STORE - Clique no botão abaixo para comprar!")
+        
+        view = ProdutoCompraView(produto_id, produto_info['nome'], produto_info.get('variacoes', []))
+        
+        await canal.purge(limit=10)
+        await canal.send(embed=embed, view=view)
+        
+        await interaction.followup.send(f"✅ Canal {canal.mention} configurado para o produto `{produto_info['nome']}`!", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao configurar produto: {e}")
+        try:
+            await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
+        except:
+            pass
+
+@bot.tree.command(name="sincronizar_canal", description="[ADMIN] Atualizar embed de um canal existente")
+@app_commands.describe(produto_id="ID do produto")
+async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.followup.send(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+        
+        produto_info = produtos_disponiveis[produto_id]
+        canal = interaction.channel
+        
+        embed = discord.Embed(
+            title=f"🛒 {produto_info['nome']}",
+            description=produto_info['descricao'],
+            color=0xffa500
+        )
+        embed.add_field(name="💰 Preço", value=f"R$ {produto_info['preco']:.2f}", inline=True)
+        embed.set_footer(text="G7 STORE - Clique no botão abaixo para comprar!")
+        
+        view = ProdutoCompraView(produto_id, produto_info['nome'], produto_info.get('variacoes', []))
+        
+        await canal.purge(limit=5)
+        await canal.send(embed=embed, view=view)
+        
+        await interaction.followup.send(f"✅ Canal sincronizado!", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao sincronizar canal: {e}")
+        try:
+            await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
+        except:
+            pass
+
+@bot.tree.command(name="set_imagem", description="[ADMIN] Definir imagem de um produto")
+@app_commands.describe(produto_id="ID do produto", url_imagem="URL da imagem")
+async def set_imagem(interaction: discord.Interaction, produto_id: str, url_imagem: str):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+        
+        produtos_disponiveis[produto_id]["imagem"] = url_imagem
+        salvar_produtos(produtos_disponiveis)
+        
+        await interaction.response.send_message(
+            f"✅ Imagem atualizada!\n🖼️ Nova imagem: {url_imagem}\n\n💡 Use `/sincronizar_canal {produto_id}` para aplicar.",
+            ephemeral=True
+        )
+    except Exception as e:
+        print(f"❌ Erro ao definir imagem: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="configurar_2fa", description="[ADMIN] Configurar canal de 2FA com botão")
+async def configurar_2fa(interaction: discord.Interaction):
+    try:
+        if MEU_ID and interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="🔐 GERADOR DE CÓDIGO 2FA",
+            description="Clique no botão abaixo para gerar seu código 2FA de forma rápida e segura.\n\n"
+                        "1️⃣ Clique em **Gerar Código 2FA**\n"
+                        "2️⃣ Cole sua chave secreta\n"
+                        "3️⃣ O bot enviará o código atual para você!",
+            color=0x00ff88
+        )
+        embed.set_footer(text="G7 STORE - Segurança em primeiro lugar")
+        
+        await interaction.channel.send(embed=embed, view=Canal2FAView())
+        await interaction.response.send_message("✅ Canal de 2FA configurado!", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao configurar 2FA: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="2fa", description="Gerar código 2FA a partir da chave")
+@app_commands.describe(chave="Sua chave 2FA (ex: 7J64V3P3E77J3LKNUGSZ5QANTLRLTKVL)")
+async def gerar_2fa(interaction: discord.Interaction, chave: str):
+    try:
+        await interaction.response.defer(ephemeral=True)
+        
+        chave = chave.strip().upper()
+        if len(chave) < 16:
+            embed = discord.Embed(
+                title="❌ **CHAVE INVÁLIDA**",
+                description="A chave deve ter pelo menos 16 caracteres.",
+                color=0xff0000,
+                timestamp=datetime.now()
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+        
+        totp = pyotp.TOTP(chave)
+        codigo_atual = totp.now()
+        tempo_restante = totp.interval - (int(time.time()) % totp.interval)
+        
+        embed = discord.Embed(
+            title="🔐 **CÓDIGO 2FA GERADO**",
+            description="Use o código abaixo para acessar sua conta:",
+            color=0x00ff88,
+            timestamp=datetime.now()
+        )
+        embed.add_field(name="📋 **CÓDIGO:**", value=f"```{codigo_atual}```", inline=False)
+        embed.add_field(name="⏰ **VÁLIDO POR:**", value=f"{tempo_restante} segundos", inline=True)
+        embed.add_field(name="🔑 **SUA CHAVE:**", value=f"||{chave}||", inline=False)
+        embed.set_footer(text="O código expira em 30 segundos.")
+        
+        class CopiarCodigoView(discord.ui.View):
+            def __init__(self, codigo: str):
+                super().__init__(timeout=60)
+                self.codigo = codigo
+            @discord.ui.button(label="📋 Copiar Código", style=discord.ButtonStyle.success)
+            async def copiar(self, i: discord.Interaction, b: discord.ui.Button):
+                try:
+                    await i.response.send_message(f"{self.codigo}", ephemeral=True)
+                except Exception as e:
+                    print(f"❌ Erro ao copiar: {e}")
+
+        await interaction.followup.send(embed=embed, view=CopiarCodigoView(codigo_atual), ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro 2FA: {e}")
+        try:
+            await interaction.followup.send("❌ Erro ao gerar código. Verifique a chave.", ephemeral=True)
+        except:
+            pass
+
+@bot.tree.command(name="ping", description="Verificar se o bot está online")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message(f"🏓 Pong! {round(bot.latency * 1000)}ms", ephemeral=True)
+
+@bot.tree.command(name="produtos", description="Ver todos os produtos disponíveis")
+async def listar_produtos(interaction: discord.Interaction):
+    try:
+        if not produtos_disponiveis:
+            await interaction.response.send_message("📦 **Nenhum produto cadastrado ainda!**\n\nUse `/criar_produto` para adicionar.", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="🛒 G7 STORE - PRODUTOS",
+            description="Use `/comprar [id]` para adquirir qualquer produto!",
+            color=0x2b2d31,
+            timestamp=datetime.now()
+        )
+        
+        for key, prod in produtos_disponiveis.items():
+            tipo_texto = "Automática" if prod.get('tipo') == 'auto' else "Manual"
+            qtd_variacoes = len(prod.get("variacoes", []))
+            qtd_estoque = verificar_estoque(key)
+            estoque_texto = f" | {qtd_estoque} em estoque" if prod.get('tipo') == 'auto' else ""
+            variacoes_texto = f" | {qtd_variacoes} opções" if qtd_variacoes > 0 else ""
+            
+            embed.add_field(
+                name=f"📦 {prod['nome']}",
+                value=f"💰 Preço: R$ {prod['preco']:.2f}\n"
+                      f"📝 Entrega: {tipo_texto}{variacoes_texto}{estoque_texto}\n"
+                      f"🆔 ID: `{key}`",
+                inline=False
+            )
+        
+        embed.set_footer(text="G7 STORE")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao listar produtos: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+# ===============================
+# CLASSE DE COMPRA
+# ===============================
+class ProdutoCompraView(discord.ui.View):
+    def __init__(self, produto_id: str, produto_nome: str, variacoes: list = None):
+        super().__init__(timeout=None)
+        self.produto_id = produto_id
+        self.produto_nome = produto_nome
+        self.variacoes = variacoes or []
+    
+    @discord.ui.button(label="🛒 Comprar", style=discord.ButtonStyle.success, custom_id="btn_comprar")
+    async def comprar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            if self.variacoes and len(self.variacoes) > 0:
+                view = VariacoesView(self.produto_id, self.produto_nome, self.variacoes)
+                await interaction.followup.send(
+                    f"📦 **{self.produto_nome}**\n\nSelecione a opção desejada:",
+                    view=view,
+                    ephemeral=True
+                )
+                return
+            
+            user = interaction.user
+            
+            produto_info = produtos_disponiveis[self.produto_id]
+            
+            qtd_estoque = verificar_estoque(self.produto_id)
+            if qtd_estoque == 0 and produto_info.get("tipo") == "auto":
+                await interaction.followup.send("❌ **Produto esgotado!** Aguarde reposição.", ephemeral=True)
+                return
+            
+            pix_data = criar_pagamento_pix_com_preco(user.id, self.produto_id, produto_info["preco"], self.produto_nome)
+            
+            if not pix_data:
+                await interaction.followup.send("❌ Erro ao gerar pagamento.", ephemeral=True)
+                return
+            
+            await log_carrinho_ativo(
+                user=user,
+                produto_nome=pix_data['produto'],
+                valor=pix_data['preco'],
+                pagamento_id=pix_data.get('payment_id', 'N/A')
+            )
+            
+            embed_pix = discord.Embed(
+                title="🧾 PAGAMENTO PIX",
+                description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}",
+                color=0x00ff88
+            )
+            
+            try:
+                expiracao = datetime.fromisoformat(pix_data["expiration"].replace("Z", "+00:00"))
+                tempo_restante = expiracao - datetime.now(expiracao.tzinfo)
+                minutos = int(tempo_restante.total_seconds() / 60)
+                embed_pix.add_field(name="⏰ Expira em", value=f"{minutos} minutos", inline=True)
+            except:
+                embed_pix.add_field(name="⏰ Expira em", value="15 minutos", inline=True)
+            
+            embed_pix.set_footer(text="Você receberá o produto aqui assim que o pagamento for confirmado!")
+            
+            qr_image_data = base64.b64decode(pix_data["qr_code_base64"])
+            copiar_view = CopiarPIXView(pix_data["qr_code"])
+            
+            with BytesIO(qr_image_data) as image_binary:
+                image_binary.seek(0)
+                file = discord.File(fp=image_binary, filename="qrcode.png")
+                await user.send(embed=embed_pix, file=file, view=copiar_view)
+                
+            await interaction.followup.send("📨 Informações enviadas no seu privado!", ephemeral=True)
+        except Exception as e:
+            print(f"❌ Erro ao processar compra: {e}")
+            try:
+                await interaction.followup.send("❌ Ocorreu um erro.", ephemeral=True)
+            except:
+                pass
+
+# ===============================
+# WEBHOOK
+# ===============================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 G7 STORE - Bot está online e funcionando!", 200
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    start_time = time.time()
+    print("\n" + "⚡" * 20)
+    print(f"WEBHOOK RECEBIDO ÀS {datetime.now().strftime('%H:%M:%S')}")
+    
+    data = {}
+    if request.is_json:
+        data = request.json
+    elif request.form:
+        data = request.form.to_dict()
+    
+    print(f"📩 Dados recebidos: {json.dumps(data, indent=2)}")
+    
+    payment_id = None
+    
+    if isinstance(data, dict):
+        payment_id = data.get('data', {}).get('id')
+        if not payment_id:
+            payment_id = data.get('id')
+        if not payment_id and 'resource' in data:
+            resource = data.get('resource', '')
+            payment_id = resource.split('/')[-1] if '/' in resource else None
+
+    if not payment_id:
+        payment_id = request.args.get('id') or request.args.get('data.id')
+    
+    if not payment_id:
+        print("⚠️ Webhook recebido, mas nenhum ID de pagamento encontrado.")
+        return "OK", 200
+    
+    print(f"💰 ID de Pagamento Identificado: {payment_id}")
+
+    with webhook_lock:
+        if str(payment_id) in pagamentos_processados:
+            print(f"⚠️ Pagamento {payment_id} já foi processado! Ignorando...")
+            return "OK", 200
+        
+        try:
+            print(f"🔍 Buscando pagamento {payment_id} no Mercado Pago...")
+            payment_response = sdk.payment().get(payment_id)
+            print(f"📦 Resposta do MP: status={payment_response.get('status')}")
+            
+            if payment_response["status"] == 200:
+                payment = payment_response["response"]
+                print(f"✅ Status do pagamento: {payment.get('status')}")
+                
+                if payment["status"] == "approved":
+                    print("🎉 PAGAMENTO APROVADO!")
+                    
+                    pagamentos_processados.add(str(payment_id))
+                    salvar_pagamentos_processados(pagamentos_processados)
+                    print(f"✅ Pagamento {payment_id} marcado como processado")
+                    
+                    ref = payment.get("external_reference", "")
+                    print(f"🔗 External reference: {ref}")
+                    
+                    if ref:
+                        partes = ref.split('_')
+                        print(f"🧩 Partes da referência: {partes}")
+                        
+                        if len(partes) >= 3:
+                            user_id = int(partes[-2])
+                            
+                            if len(partes) == 3:
+                                produto_id = partes[0]
+                                variacao_nome = None
+                            else:
+                                produto_id = partes[0]
+                                variacao_nome = partes[1]
+                            
+                            print(f"📦 Produto ID: {produto_id}")
+                            print(f"👤 User ID: {user_id}")
+                            
+                            user = bot.get_user(user_id)
+                            if not user:
+                                try:
+                                    future = asyncio.run_coroutine_threadsafe(
+                                        bot.fetch_user(user_id), bot.loop
+                                    )
+                                    user = future.result(timeout=10)
+                                    print(f"👤 Usuário encontrado: {user}")
+                                except Exception as e:
+                                    print(f"❌ Erro ao buscar usuário: {e}")
+                            
+                            if user and produto_id in produtos_disponiveis:
+                                produto_info = produtos_disponiveis[produto_id]
+                                print(f"📦 Produto: {produto_info['nome']} - Tipo: {produto_info.get('tipo')}")
+                                
+                                if produto_info.get("tipo") == "auto":
+                                    item = entregar_do_estoque(produto_id, variacao_nome=variacao_nome)
+                                    
+                                    if item:
+                                        async def enviar_dm():
+                                            try:
+                                                await user.send(
+                                                    f"✅ **Pagamento confirmado!**\n\n"
+                                                    f"📦 **{produto_info['nome']}**\n\n"
+                                                    f"🔐 **Seu produto:**\n```{item}```\n\n"
+                                                    "✅ Obrigado pela preferência!"
+                                                )
+                                                process_time = time.time() - start_time
+                                                print(f"🚀 ENTREGA REALIZADA EM {process_time:.2f} SEGUNDOS!")
+                                                
+                                                await log_pagamento_confirmado(
+                                                    user=user,
+                                                    produto_nome=produto_info['nome'],
+                                                    valor=payment.get('transaction_amount', 0),
+                                                    pagamento_id=payment_id,
+                                                    item_entregue=item
+                                                )
+                                            except discord.Forbidden:
+                                                print(f"⚠️ DM fechada para {user.name}. Avisando no canal...")
+                                                canal_pagos = bot.get_channel(CANAL_PAGOS)
+                                                if canal_pagos:
+                                                    await canal_pagos.send(f"⚠️ {user.mention}, seu pagamento de **{produto_info['nome']}** foi aprovado, mas sua DM está fechada! Abra um ticket para receber seu produto.")
+                                                with estoque_lock:
+                                                    if variacao_nome:
+                                                        estoque_disponivel[produto_id]["variacoes"][variacao_nome].insert(0, item)
+                                                    else:
+                                                        estoque_disponivel[produto_id]["itens"].insert(0, item)
+                                                    salvar_estoque(estoque_disponivel)
+                                        asyncio.run_coroutine_threadsafe(enviar_dm(), bot.loop)
+                                    else:
+                                        async def avisar_esgotado():
+                                            try:
+                                                await user.send(f"✅ **Pagamento confirmado!**\n\n📦 **{produto_info['nome']}**\n\n⚠️ **Estoque esgotado!** Um administrador irá entregar em breve.")
+                                            except:
+                                                pass
+                                        asyncio.run_coroutine_threadsafe(avisar_esgotado(), bot.loop)
+                                else:
+                                    async def avisar_manual():
+                                        try:
+                                            await user.send(f"✅ **Pagamento confirmado!**\n\n📦 **{produto_info['nome']}**\n\n⏳ Um administrador irá entregar seu produto em breve!")
+                                        except:
+                                            pass
+                                    asyncio.run_coroutine_threadsafe(avisar_manual(), bot.loop)
+                            else:
+                                print(f"⚠️ Usuário ou produto não encontrado")
+                        else:
+                            print(f"⚠️ Referência inválida: {ref}")
+                    else:
+                        print(f"⚠️ Nenhuma referência externa encontrada")
+                else:
+                    print(f"⚠️ Pagamento não aprovado. Status: {payment['status']}")
+            else:
+                print(f"❌ Erro ao buscar pagamento: {payment_response}")
+        except Exception as e:
+            print(f"❌ ERRO NO WEBHOOK: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    print("⚡" * 20 + "\n")
+    return "OK", 200
+
+# ===============================
+# INICIAR BOT E SERVIDOR FLASK
+# ===============================
+
+def run_flask():
+    app.run(host='0.0.0.0', port=5000, debug=False)
+
+if __name__ == "__main__":
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    bot.run(DISCORD_TOKEN)
