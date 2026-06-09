@@ -55,7 +55,7 @@ CARGO_MEMBRO = 1472666559049633952
 CARGO_CLIENTE = 1472666841515032676
 CANAL_CARRINHOS = 1473180070851117108
 CANAL_PAGOS = 1473182832225554554
-MEU_ID = 736643333840961547
+MEU_ID = 1431125477069688953
 CARGO_ADMIN = 1472666559049633952
 
 carrinhos_ativos = {}
@@ -498,7 +498,7 @@ async def criar_embed_produto_tzada(produto_id: str, produto_info: dict):
                 inline=True
             )
         
-        embed.set_footer(text="M7 STORE - Clique no botão abaixo para comprar!")
+        embed.set_footer(text="G7 STORE - Clique no botão abaixo para comprar!")
         embed.timestamp = datetime.now()
         
         return embed  # Retorna um único embed
@@ -838,7 +838,7 @@ async def listar_produtos(interaction: discord.Interaction):
             return
         
         embed = discord.Embed(
-            title="🛒 M7 STORE - PRODUTOS",
+            title="🛒 G7 STORE - PRODUTOS",
             description="Use `/comprar [id]` para adquirir qualquer produto!",
             color=0x2b2d31,
             timestamp=datetime.now()
@@ -859,7 +859,7 @@ async def listar_produtos(interaction: discord.Interaction):
                 inline=False
             )
         
-        embed.set_footer(text="M7 STORE")
+        embed.set_footer(text="G7 STORE")
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
         print(f"❌ Erro ao listar produtos: {e}")
@@ -1038,7 +1038,7 @@ async def configurar_2fa(interaction: discord.Interaction):
                         "3️⃣ O bot enviará o código atual para você!",
             color=0x00ff88
         )
-        embed.set_footer(text="M7 STORE - Segurança em primeiro lugar")
+        embed.set_footer(text="G7 STORE - Segurança em primeiro lugar")
         
         await interaction.channel.send(embed=embed, view=Canal2FAView())
         await interaction.response.send_message("✅ Canal de 2FA configurado!", ephemeral=True)
@@ -1370,7 +1370,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 M7 STORE - Bot está online e funcionando!", 200
+    return "🤖 G7 STORE - Bot está online e funcionando!", 200
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
