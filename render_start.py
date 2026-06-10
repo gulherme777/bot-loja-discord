@@ -400,30 +400,19 @@ class VariacoesView(discord.ui.View):
             )
             
             embed_pix = discord.Embed(
-                title="🧾 PAGAMENTO PIX",
-                description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}",
+                title="🧾 PAGAMENTO - G7 STORE",
+                description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}\n\nClique no botão abaixo para pagar via **PIX** ou **Cartão**.",
                 color=0x00ff88
             )
-            
-            try:
-                expiracao = datetime.fromisoformat(pix_data["expiration"].replace("Z", "+00:00"))
-                tempo_restante = expiracao - datetime.now(expiracao.tzinfo)
-                minutos = int(tempo_restante.total_seconds() / 60)
-                embed_pix.add_field(name="⏰ Expira em", value=f"{minutos} minutos", inline=True)
-            except:
-                embed_pix.add_field(name="⏰ Expira em", value="15 minutos", inline=True)
-            
             embed_pix.set_footer(text="Você receberá o produto aqui assim que o pagamento for confirmado!")
             
-            qr_image_data = base64.b64decode(pix_data["qr_code_base64"])
-            copiar_view = CopiarPIXView(pix_data["qr_code"])
+            class PagarView(discord.ui.View):
+                def __init__(self, url):
+                    super().__init__(timeout=300)
+                    self.add_item(discord.ui.Button(label="🔗 Pagar Agora (InfinitePay)", url=url))
             
-            with BytesIO(qr_image_data) as image_binary:
-                image_binary.seek(0)
-                file = discord.File(fp=image_binary, filename="qrcode.png")
-                await user.send(embed=embed_pix, file=file, view=copiar_view)
-                
-            await interaction.followup.send("📨 Informações enviadas no seu privado!", ephemeral=True)
+            await user.send(embed=embed_pix, view=PagarView(pix_data['payment_url']))
+            await interaction.followup.send("📨 Link de pagamento enviado no seu privado!", ephemeral=True)
         except Exception as e:
             print(f"❌ Erro ao processar variação: {e}")
             try:
@@ -547,30 +536,19 @@ class ProdutoCompraView(discord.ui.View):
             )
             
             embed_pix = discord.Embed(
-                title="🧾 PAGAMENTO PIX",
-                description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}",
+                title="🧾 PAGAMENTO - G7 STORE",
+                description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}\n\nClique no botão abaixo para pagar via **PIX** ou **Cartão**.",
                 color=0x00ff88
             )
-            
-            try:
-                expiracao = datetime.fromisoformat(pix_data["expiration"].replace("Z", "+00:00"))
-                tempo_restante = expiracao - datetime.now(expiracao.tzinfo)
-                minutos = int(tempo_restante.total_seconds() / 60)
-                embed_pix.add_field(name="⏰ Expira em", value=f"{minutos} minutos", inline=True)
-            except:
-                embed_pix.add_field(name="⏰ Expira em", value="15 minutos", inline=True)
-            
             embed_pix.set_footer(text="Você receberá o produto aqui assim que o pagamento for confirmado!")
             
-            qr_image_data = base64.b64decode(pix_data["qr_code_base64"])
-            copiar_view = CopiarPIXView(pix_data["qr_code"])
+            class PagarView(discord.ui.View):
+                def __init__(self, url):
+                    super().__init__(timeout=300)
+                    self.add_item(discord.ui.Button(label="🔗 Pagar Agora (InfinitePay)", url=url))
             
-            with BytesIO(qr_image_data) as image_binary:
-                image_binary.seek(0)
-                file = discord.File(fp=image_binary, filename="qrcode.png")
-                await user.send(embed=embed_pix, file=file, view=copiar_view)
-                
-            await interaction.followup.send("📨 Informações enviadas no seu privado!", ephemeral=True)
+            await user.send(embed=embed_pix, view=PagarView(pix_data['payment_url']))
+            await interaction.followup.send("📨 Link de pagamento enviado no seu privado!", ephemeral=True)
         except Exception as e:
             print(f"❌ Erro ao processar compra: {e}")
             try:
