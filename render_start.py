@@ -144,8 +144,6 @@ def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
         
         if response.status_code in [200, 201]:
             data = response.json()
-            # A API de Checkout retorna um link. O cliente paga lá.
-            # Como o usuário quer QR Code direto, informamos que o link é seguro.
             return {
                 "payment_url": data.get("url"),
                 "produto": nome_produto,
@@ -154,11 +152,10 @@ def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
                 "produto_id": produto_id
             }
         else:
-            print(f"❌ Erro InfinitePay: {response.status_code} - {response.text}")
-            return None
+            # Retorna o erro formatado para ser exibido
+            return {"erro": f"InfinitePay {response.status_code}: {response.text}"}
     except Exception as e:
-        print(f"❌ Erro ao gerar link InfinitePay: {e}")
-        return None
+        return {"erro": f"Exceção: {str(e)}"}
 
 # ===============================
 # FUNÇÕES DE ESTOQUE
@@ -386,15 +383,20 @@ class VariacoesView(discord.ui.View):
                 )
                 return
             
-            pix_data = criar_pagamento_pix_com_preco(
-                user.id,
-                f"{self.produto_id}_{variacao['nome']}",
-                variacao["preco"],
-                f"{self.produto_nome} - {variacao['nome']}"
-            )
+            try:
+                pix_data = criar_pagamento_pix_com_preco(
+                    user.id,
+                    f"{self.produto_id}_{variacao['nome']}",
+                    variacao["preco"],
+                    f"{self.produto_nome} - {variacao['nome']}"
+                )
+            except Exception as e:
+                await interaction.followup.send(f"❌ Erro Técnico: {e}", ephemeral=True)
+                return
             
-            if not pix_data:
-                await interaction.followup.send("❌ Erro ao gerar pagamento.", ephemeral=True)
+            if not pix_data or "erro" in pix_data:
+                msg_erro = pix_data["erro"] if pix_data and "erro" in pix_data else "Erro desconhecido"
+                await interaction.followup.send(f"❌ Erro ao gerar pagamento: `{msg_erro}`", ephemeral=True)
                 return
             
             await log_carrinho_ativo(
@@ -527,10 +529,15 @@ class ProdutoCompraView(discord.ui.View):
                 await interaction.followup.send("❌ **Produto esgotado!** Aguarde reposição.", ephemeral=True)
                 return
             
-            pix_data = criar_pagamento_pix_com_preco(user.id, self.produto_id, produto_info["preco"], self.produto_nome)
+            try:
+                pix_data = criar_pagamento_pix_com_preco(user.id, self.produto_id, produto_info["preco"], self.produto_nome)
+            except Exception as e:
+                await interaction.followup.send(f"❌ Erro Técnico: {e}", ephemeral=True)
+                return
             
-            if not pix_data:
-                await interaction.followup.send("❌ Erro ao gerar pagamento.", ephemeral=True)
+            if not pix_data or "erro" in pix_data:
+                msg_erro = pix_data["erro"] if pix_data and "erro" in pix_data else "Erro desconhecido"
+                await interaction.followup.send(f"❌ Erro ao gerar pagamento: `{msg_erro}`", ephemeral=True)
                 return
             
             await log_carrinho_ativo(
