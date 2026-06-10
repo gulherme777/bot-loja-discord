@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-import mercadopago
+import requests
 from flask import Flask, request
 import threading
 import asyncio
@@ -19,14 +19,14 @@ print("🔧 Iniciando bot da G7 STORE...")
 # CONFIGURAÇÕES
 # ===============================
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
-MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
+INFINITE_TAG = "guilherme_vinicius90"
 
 # Se estiver testando localmente com .env
 try:
     from dotenv import load_dotenv
     load_dotenv()
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", DISCORD_TOKEN)
-    MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN", MP_ACCESS_TOKEN)
+    
 except ImportError:
     pass
 
@@ -110,52 +110,49 @@ estoque_disponivel = carregar_estoque()
 produtos_disponiveis = carregar_produtos()
 
 # ===============================
-# MERCADO PAGO
+# INFINITEPAY
 # ===============================
-sdk = None
-if MP_ACCESS_TOKEN:
-    sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
-    print("✅ SDK Mercado Pago inicializado")
-else:
-    print("⚠️ MP_ACCESS_TOKEN não configurado. Pagamentos PIX falharão.")
+
 
 def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
-    if not sdk:
-        print("❌ Erro: SDK Mercado Pago não configurado.")
-        return None
     try:
-        preco_formatado = round(float(preco), 2)
-        payment_data = {
-            "transaction_amount": preco_formatado,
-            "description": f"Compra: {nome_produto}"[:60],
-            "payment_method_id": "pix",
-            "payer": {
-                "email": f"c_{user_id}@cliente.com",
-                "first_name": "Cliente",
-                "last_name": str(user_id)
-            },
-            "external_reference": f"{produto_id}_{user_id}_{int(time.time())}",
-            "installments": 1
+        # InfinitePay usa valores em centavos
+        preco_centavos = int(float(preco) * 100)
+        
+        payload = {
+            "handle": INFINITE_TAG,
+            "order_nsu": f"{produto_id}_{user_id}_{int(time.time())}",
+            "itens": [
+                {
+                    "quantity": 1,
+                    "price": preco_centavos,
+                    "description": f"Compra: {nome_produto}"[:60]
+                }
+            ]
         }
+        
         if WEBHOOK_URL and WEBHOOK_URL.startswith("https"):
-            payment_data["notification_url"] = WEBHOOK_URL
+            payload["webhook_url"] = WEBHOOK_URL
 
-        result = sdk.payment().create(payment_data)
-        if result.get("status") in [200, 201]:
-            payment = result["response"]
-            pix_data = payment.get("point_of_interaction", {}).get("transaction_data", {})
+        print(f"🔍 Gerando link InfinitePay para {nome_produto} (R$ {preco})...")
+        response = requests.post("https://api.checkout.infinitepay.io/links", json=payload)
+        
+        if response.status_code in [200, 201]:
+            data = response.json()
+            # A API de Checkout retorna um link. O cliente paga lá.
+            # Como o usuário quer QR Code direto, informamos que o link é seguro.
             return {
-                "qr_code": pix_data.get("qr_code"),
-                "qr_code_base64": pix_data.get("qr_code_base64"),
-                "expiration": payment.get("date_of_expiration"),
+                "payment_url": data.get("url"),
                 "produto": nome_produto,
-                "preco": preco_formatado,
-                "payment_id": payment.get("id"),
+                "preco": float(preco),
+                "payment_id": data.get("invoice_slug"),
                 "produto_id": produto_id
             }
-        return None
+        else:
+            print(f"❌ Erro InfinitePay: {response.status_code} - {response.text}")
+            return None
     except Exception as e:
-        print(f"❌ Erro ao gerar PIX: {e}")
+        print(f"❌ Erro ao gerar link InfinitePay: {e}")
         return None
 
 # ===============================
@@ -1372,44 +1369,69 @@ app = Flask(__name__)
 def home():
     return "🤖 G7 STORE - Bot está online e funcionando!", 200
 
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    start_time = time.time()
     print("\n" + "⚡" * 20)
-    print(f"WEBHOOK RECEBIDO ÀS {datetime.now().strftime('%H:%M:%S')}")
+    print(f"WEBHOOK INFINITEPAY RECEBIDO ÀS {datetime.now().strftime('%H:%M:%S')}")
     
-    # Tenta pegar os dados de várias formas (JSON, Form, Args)
-    data = {}
-    if request.is_json:
-        data = request.json
-    elif request.form:
-        data = request.form.to_dict()
+    data = request.json if request.is_json else {}
+    print(f"📩 Dados: {json.dumps(data, indent=2)}")
     
-    print(f"📩 Dados recebidos: {json.dumps(data, indent=2)}")
-    
-    # O Mercado Pago envia o ID de formas diferentes dependendo do tipo de evento
-    payment_id = None
-    
-    # 1. Tenta extrair de data.id (comum em notificações de pagamento)
-    if isinstance(data, dict):
-        payment_id = data.get('data', {}).get('id')
-        
-        # 2. Tenta extrair do ID direto (comum em outros eventos)
-        if not payment_id:
-            payment_id = data.get('id')
-            
-        # 3. Tenta extrair de resource (alguns webhooks enviam a URL do recurso)
-        if not payment_id and 'resource' in data:
-            resource = data.get('resource', '')
-            payment_id = resource.split('/')[-1] if '/' in resource else None
-
-    # 4. Tenta extrair dos parâmetros da URL (Query Args)
-    if not payment_id:
-        payment_id = request.args.get('id') or request.args.get('data.id')
+    # Formato InfinitePay: { "invoice_slug": "...", "order_nsu": "...", "amount": ... }
+    payment_id = data.get('invoice_slug')
+    ref = data.get('order_nsu', '')
     
     if not payment_id:
-        print("⚠️ Webhook recebido, mas nenhum ID de pagamento encontrado. Pode ser um teste do MP.")
         return "OK", 200
+
+    with webhook_lock:
+        if str(payment_id) in pagamentos_processados:
+            return "OK", 200
+        
+        try:
+            # InfinitePay envia o webhook apenas quando aprovado
+            print(f"✅ Pagamento {payment_id} APROVADO na InfinitePay!")
+            
+            pagamentos_processados.add(str(payment_id))
+            salvar_pagamentos_processados(pagamentos_processados)
+            
+            if ref:
+                partes = ref.split('_')
+                if len(partes) >= 3:
+                    produto_id = partes[0]
+                    user_id = int(partes[-2])
+                    
+                    user = bot.get_user(user_id)
+                    if not user:
+                        try:
+                            future = asyncio.run_coroutine_threadsafe(bot.fetch_user(user_id), bot.loop)
+                            user = future.result(timeout=10)
+                        except: pass
+                    
+                    if user and produto_id in produtos_disponiveis:
+                        produto_info = produtos_disponiveis[produto_id]
+                        
+                        # Se tiver variação na referência
+                        variacao_nome = partes[1] if len(partes) == 4 else None
+                        
+                        if produto_info.get("tipo") == "auto":
+                            item = entregar_do_estoque(produto_id, variacao_nome=variacao_nome)
+                            if item:
+                                async def enviar_entrega():
+                                    try:
+                                        await user.send(f"✅ **Pagamento confirmado!**\n\n📦 **{produto_info['nome']}**\n\n🔐 **Seu produto:**\n```{item}```\n\n✅ Obrigado pela preferência!")
+                                        await log_pagamento_confirmado(user, produto_info['nome'], data.get('amount', 0)/100, payment_id, item)
+                                    except: pass
+                                asyncio.run_coroutine_threadsafe(enviar_entrega(), bot.loop)
+                            else:
+                                asyncio.run_coroutine_threadsafe(user.send("✅ Pagamento confirmado, mas o estoque acabou! Um admin vai te entregar em breve."), bot.loop)
+                        else:
+                            asyncio.run_coroutine_threadsafe(user.send(f"✅ Pagamento confirmado para **{produto_info['nome']}**! Um administrador fará a entrega manual em breve."), bot.loop)
+        except Exception as e:
+            print(f"❌ Erro Webhook: {e}")
+            
+    return "OK", 200
     
     print(f"💰 ID de Pagamento Identificado: {payment_id}")
 
