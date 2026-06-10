@@ -26,7 +26,7 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", DISCORD_TOKEN)
-    
+    MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN", MP_ACCESS_TOKEN)
 except ImportError:
     pass
 
@@ -110,52 +110,76 @@ estoque_disponivel = carregar_estoque()
 produtos_disponiveis = carregar_produtos()
 
 # ===============================
-# INFINITEPAY
+# MERCADO PAGO
 # ===============================
+sdk = None
+if MP_ACCESS_TOKEN:
+    
+    print("✅ SDK Mercado Pago inicializado")
+else:
+    print("⚠️ MP_ACCESS_TOKEN não configurado. Pagamentos PIX falharão.")
 
 
 def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
     try:
-        # InfinitePay usa valores em centavos
-        preco_centavos = int(float(preco) * 100)
-        
+        valor_float = float(preco)
+        if valor_float < 1.0:
+            return {"erro": "A InfinitePay exige um valor mínimo de R$ 1,00 para pagamentos."}
+        preco_centavos = int(round(valor_float * 100))
         payload = {
             "handle": INFINITE_TAG,
             "order_nsu": f"{produto_id}_{user_id}_{int(time.time())}",
-            "items": [
-                {
-                    "quantity": 1,
-                    "price": preco_centavos,
-                    "description": f"Compra: {nome_produto}"[:60]
-                }
-            ]
+            "items": [{"quantity": 1, "price": preco_centavos, "description": f"Compra: {nome_produto}"[:60]}]
         }
-        
         if WEBHOOK_URL and WEBHOOK_URL.startswith("https"):
             payload["webhook_url"] = WEBHOOK_URL
-
-        print(f"🔍 Gerando link InfinitePay para {nome_produto} (R$ {preco})...")
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         response = requests.post("https://api.checkout.infinitepay.io/links", json=payload, headers=headers, timeout=15)
-        
         if response.status_code in [200, 201]:
             data = response.json()
+            return {"payment_url": data.get("url"), "produto": nome_produto, "preco": float(preco), "payment_id": data.get("invoice_slug"), "produto_id": produto_id}
+        return {"erro": f"InfinitePay {response.status_code}: {response.text}"}
+    except Exception as e:
+        return {"erro": str(e)}
+
+    try:
+        preco_formatado = round(float(preco), 2)
+        payment_data = {
+            "transaction_amount": preco_formatado,
+            "description": f"Compra: {nome_produto}"[:60],
+            "payment_method_id": "pix",
+            "payer": {
+                "email": f"c_{user_id}@cliente.com",
+                "first_name": "Cliente",
+                "last_name": str(user_id)
+            },
+            "external_reference": f"{produto_id}_{user_id}_{int(time.time())}",
+            "installments": 1
+        }
+        if WEBHOOK_URL and WEBHOOK_URL.startswith("https"):
+            payment_data["notification_url"] = WEBHOOK_URL
+
+        result = sdk.payment().create(payment_data)
+        if result.get("status") in [200, 201]:
+            payment = result["response"]
+            pix_data = payment.get("point_of_interaction", {}).get("transaction_data", {})
             return {
-                "payment_url": data.get("url"),
+                "qr_code": pix_data.get("qr_code"),
+                "qr_code_base64": pix_data.get("qr_code_base64"),
+                "expiration": payment.get("date_of_expiration"),
                 "produto": nome_produto,
-                "preco": float(preco),
-                "payment_id": data.get("invoice_slug"),
+                "preco": preco_formatado,
+                "payment_id": payment.get("id"),
                 "produto_id": produto_id
             }
-        else:
-            # Retorna o erro formatado para ser exibido
-            return {"erro": f"InfinitePay {response.status_code}: {response.text}"}
+        return None
     except Exception as e:
-        return {"erro": f"Exceção: {str(e)}"}
+        print(f"❌ Erro ao gerar PIX: {e}")
+        return None
 
 # ===============================
 # FUNÇÕES DE ESTOQUE
@@ -383,13 +407,9 @@ class VariacoesView(discord.ui.View):
                 )
                 return
             
+            
             try:
-                pix_data = criar_pagamento_pix_com_preco(
-                    user.id,
-                    f"{self.produto_id}_{variacao['nome']}",
-                    variacao["preco"],
-                    f"{self.produto_nome} - {variacao['nome']}"
-                )
+                pix_data = criar_pagamento_pix_com_preco(user.id, self.produto_id if hasattr(self, 'produto_id') else f"{self.produto_id}_{variacao['nome']}", variacao['preco'] if 'variacao' in locals() else produto_info['preco'], f"{self.produto_nome} - {variacao['nome']}" if 'variacao' in locals() else self.produto_nome)
             except Exception as e:
                 await interaction.followup.send(f"❌ Erro Técnico: {e}", ephemeral=True)
                 return
@@ -399,12 +419,7 @@ class VariacoesView(discord.ui.View):
                 await interaction.followup.send(f"❌ Erro ao gerar pagamento: `{msg_erro}`", ephemeral=True)
                 return
             
-            await log_carrinho_ativo(
-                user=user,
-                produto_nome=pix_data['produto'],
-                valor=pix_data['preco'],
-                pagamento_id=pix_data.get('payment_id', 'N/A')
-            )
+            await log_carrinho_ativo(user=user, produto_nome=pix_data['produto'], valor=pix_data['preco'], pagamento_id=pix_data.get('payment_id', 'N/A'))
             
             embed_pix = discord.Embed(
                 title="🧾 PAGAMENTO - G7 STORE",
@@ -420,6 +435,7 @@ class VariacoesView(discord.ui.View):
             
             await user.send(embed=embed_pix, view=PagarView(pix_data['payment_url']))
             await interaction.followup.send("📨 Link de pagamento enviado no seu privado!", ephemeral=True)
+
         except Exception as e:
             print(f"❌ Erro ao processar variação: {e}")
             try:
@@ -529,8 +545,9 @@ class ProdutoCompraView(discord.ui.View):
                 await interaction.followup.send("❌ **Produto esgotado!** Aguarde reposição.", ephemeral=True)
                 return
             
+            
             try:
-                pix_data = criar_pagamento_pix_com_preco(user.id, self.produto_id, produto_info["preco"], self.produto_nome)
+                pix_data = criar_pagamento_pix_com_preco(user.id, self.produto_id if hasattr(self, 'produto_id') else f"{self.produto_id}_{variacao['nome']}", variacao['preco'] if 'variacao' in locals() else produto_info['preco'], f"{self.produto_nome} - {variacao['nome']}" if 'variacao' in locals() else self.produto_nome)
             except Exception as e:
                 await interaction.followup.send(f"❌ Erro Técnico: {e}", ephemeral=True)
                 return
@@ -540,12 +557,7 @@ class ProdutoCompraView(discord.ui.View):
                 await interaction.followup.send(f"❌ Erro ao gerar pagamento: `{msg_erro}`", ephemeral=True)
                 return
             
-            await log_carrinho_ativo(
-                user=user,
-                produto_nome=pix_data['produto'],
-                valor=pix_data['preco'],
-                pagamento_id=pix_data.get('payment_id', 'N/A')
-            )
+            await log_carrinho_ativo(user=user, produto_nome=pix_data['produto'], valor=pix_data['preco'], pagamento_id=pix_data.get('payment_id', 'N/A'))
             
             embed_pix = discord.Embed(
                 title="🧾 PAGAMENTO - G7 STORE",
@@ -561,6 +573,7 @@ class ProdutoCompraView(discord.ui.View):
             
             await user.send(embed=embed_pix, view=PagarView(pix_data['payment_url']))
             await interaction.followup.send("📨 Link de pagamento enviado no seu privado!", ephemeral=True)
+
         except Exception as e:
             print(f"❌ Erro ao processar compra: {e}")
             try:
@@ -1390,6 +1403,7 @@ def webhook():
                 partes = ref.split('_')
                 if len(partes) >= 3:
                     produto_id = partes[0]
+                    # O penúltimo é sempre o user_id
                     user_id = int(partes[-2])
                     
                     user = bot.get_user(user_id)
@@ -1402,7 +1416,7 @@ def webhook():
                     if user and produto_id in produtos_disponiveis:
                         produto_info = produtos_disponiveis[produto_id]
                         
-                        # Se tiver variação na referência
+                        # Se tiver 4 partes: [produto, variacao, user_id, timestamp]
                         variacao_nome = partes[1] if len(partes) == 4 else None
                         
                         if produto_info.get("tipo") == "auto":
@@ -1411,150 +1425,34 @@ def webhook():
                                 async def enviar_entrega():
                                     try:
                                         await user.send(f"✅ **Pagamento confirmado!**\n\n📦 **{produto_info['nome']}**\n\n🔐 **Seu produto:**\n```{item}```\n\n✅ Obrigado pela preferência!")
-                                        await log_pagamento_confirmado(user, produto_info['nome'], data.get('amount', 0)/100, payment_id, item)
+                                        # ✅ LOG NO CANAL DE PAGOS COM O ITEM ENTREGUE
+                                        await log_pagamento_confirmado(
+                                            user=user, 
+                                            produto_nome=produto_info['nome'], 
+                                            valor=data.get('amount', 0)/100, 
+                                            pagamento_id=payment_id, 
+                                            item_entregue=item
+                                        )
                                     except: pass
                                 asyncio.run_coroutine_threadsafe(enviar_entrega(), bot.loop)
                             else:
-                                asyncio.run_coroutine_threadsafe(user.send("✅ Pagamento confirmado, mas o estoque acabou! Um admin vai te entregar em breve."), bot.loop)
+                                async def avisar_esgotado():
+                                    try:
+                                        await user.send("✅ Pagamento confirmado, mas o estoque acabou! Um admin vai te entregar em breve.")
+                                        await log_pagamento_confirmado(user, produto_info['nome'], data.get('amount', 0)/100, payment_id, "ESTOQUE ESGOTADO")
+                                    except: pass
+                                asyncio.run_coroutine_threadsafe(avisar_esgotado(), bot.loop)
                         else:
-                            asyncio.run_coroutine_threadsafe(user.send(f"✅ Pagamento confirmado para **{produto_info['nome']}**! Um administrador fará a entrega manual em breve."), bot.loop)
+                            # Entrega manual
+                            async def avisar_manual():
+                                try:
+                                    await user.send(f"✅ Pagamento confirmado para **{produto_info['nome']}**! Um administrador fará a entrega manual em breve.")
+                                    await log_pagamento_confirmado(user, produto_info['nome'], data.get('amount', 0)/100, payment_id, "ENTREGA MANUAL")
+                                except: pass
+                            asyncio.run_coroutine_threadsafe(avisar_manual(), bot.loop)
         except Exception as e:
             print(f"❌ Erro Webhook: {e}")
             
-    return "OK", 200
-    
-    print(f"💰 ID de Pagamento Identificado: {payment_id}")
-
-    with webhook_lock:
-        if str(payment_id) in pagamentos_processados:
-            print(f"⚠️ Pagamento {payment_id} já foi processado! Ignorando...")
-            return "OK", 200
-        
-        try:
-            print(f"🔍 Buscando pagamento {payment_id} no Mercado Pago...")
-            payment_response = sdk.payment().get(payment_id)
-            print(f"📦 Resposta do MP: status={payment_response.get('status')}")
-            
-            if payment_response["status"] == 200:
-                payment = payment_response["response"]
-                print(f"✅ Status do pagamento: {payment.get('status')}")
-                
-                if payment["status"] == "approved":
-                    print("🎉 PAGAMENTO APROVADO!")
-                    
-                    pagamentos_processados.add(str(payment_id))
-                    salvar_pagamentos_processados(pagamentos_processados)
-                    print(f"✅ Pagamento {payment_id} marcado como processado")
-                    
-                    ref = payment.get("external_reference", "")
-                    print(f"🔗 External reference: {ref}")
-                    
-                    if ref:
-                        # Melhoria no parsing: O external_reference é gerado como: {produto_id}_{user_id}_{timestamp}
-                        # Ou para variações: {produto_id}_{variacao}_{user_id}_{timestamp}
-                        partes = ref.split('_')
-                        print(f"🧩 Partes da referência: {partes}")
-                        
-                        if len(partes) >= 3:
-                            # O último é sempre o timestamp, o penúltimo é sempre o user_id
-                            user_id = int(partes[-2])
-                            timestamp = partes[-1]
-                            
-                            # O que sobrar no início é o produto e a variação
-                            # Se tiver 3 partes: [produto, user_id, timestamp]
-                            # Se tiver 4 partes: [produto, variacao, user_id, timestamp]
-                            if len(partes) == 3:
-                                produto_id = partes[0]
-                                variacao_nome = None
-                            else:
-                                produto_id = partes[0]
-                                variacao_nome = partes[1]
-                            
-                            print(f"📦 Produto ID: {produto_id}")
-                            print(f"👤 User ID: {user_id}")
-                            
-                            user = bot.get_user(user_id)
-                            if not user:
-                                try:
-                                    future = asyncio.run_coroutine_threadsafe(
-                                        bot.fetch_user(user_id), bot.loop
-                                    )
-                                    user = future.result(timeout=10)
-                                    print(f"👤 Usuário encontrado: {user}")
-                                except Exception as e:
-                                    print(f"❌ Erro ao buscar usuário: {e}")
-                            
-                            if user and produto_id in produtos_disponiveis:
-                                produto_info = produtos_disponiveis[produto_id]
-                                print(f"📦 Produto: {produto_info['nome']} - Tipo: {produto_info.get('tipo')}")
-                                
-                                if produto_info.get("tipo") == "auto":
-                                    item = entregar_do_estoque(produto_id, variacao_nome=variacao_nome)
-                                    
-                                    if item:
-                                        async def enviar_dm():
-                                            try:
-                                                # Prioridade máxima no envio da DM
-                                                await user.send(
-                                                    f"✅ **Pagamento confirmado!**\n\n"
-                                                    f"📦 **{produto_info['nome']}**\n\n"
-                                                    f"🔐 **Seu produto:**\n```{item}```\n\n"
-                                                    "✅ Obrigado pela preferência!"
-                                                )
-                                                process_time = time.time() - start_time
-                                                print(f"🚀 ENTREGA REALIZADA EM {process_time:.2f} SEGUNDOS!")
-                                                
-                                                # ✅ NOVO: Atualizar o carrinho com o item entregue
-                                                await log_pagamento_confirmado(
-                                                    user=user,
-                                                    produto_nome=produto_info['nome'],
-                                                    valor=payment.get('transaction_amount', 0),
-                                                    pagamento_id=payment_id,
-                                                    item_entregue=item
-                                                )
-                                            except discord.Forbidden:
-                                                print(f"⚠️ DM fechada para {user.name}. Avisando no canal...")
-                                                canal_pagos = bot.get_channel(CANAL_PAGOS)
-                                                if canal_pagos:
-                                                    await canal_pagos.send(f"⚠️ {user.mention}, seu pagamento de **{produto_info['nome']}** foi aprovado, mas sua DM está fechada! Abra um ticket para receber seu produto.")
-                                                # Devolve pro estoque
-                                                with estoque_lock:
-                                                    if variacao_nome:
-                                                        estoque_disponivel[produto_id]["variacoes"][variacao_nome].insert(0, item)
-                                                    else:
-                                                        estoque_disponivel[produto_id]["itens"].insert(0, item)
-                                                    salvar_estoque(estoque_disponivel)
-                                        asyncio.run_coroutine_threadsafe(enviar_dm(), bot.loop)
-                                    else:
-                                        async def avisar_esgotado():
-                                            try:
-                                                await user.send(f"✅ **Pagamento confirmado!**\n\n📦 **{produto_info['nome']}**\n\n⚠️ **Estoque esgotado!** Um administrador irá entregar em breve.")
-                                            except:
-                                                pass
-                                        asyncio.run_coroutine_threadsafe(avisar_esgotado(), bot.loop)
-                                else:
-                                    # Produto manual
-                                    async def avisar_manual():
-                                        try:
-                                            await user.send(f"✅ **Pagamento confirmado!**\n\n📦 **{produto_info['nome']}**\n\n⏳ Um administrador irá entregar seu produto em breve!")
-                                        except:
-                                            pass
-                                    asyncio.run_coroutine_threadsafe(avisar_manual(), bot.loop)
-                            else:
-                                print(f"⚠️ Usuário ou produto não encontrado")
-                        else:
-                            print(f"⚠️ Referência inválida: {ref}")
-                    else:
-                        print(f"⚠️ Nenhuma referência externa encontrada")
-                else:
-                    print(f"⚠️ Pagamento não aprovado. Status: {payment['status']}")
-            else:
-                print(f"❌ Erro ao buscar pagamento: {payment_response}")
-        except Exception as e:
-            print(f"❌ ERRO NO WEBHOOK: {e}")
-            import traceback
-            traceback.print_exc()
-    
     print("⚡" * 20 + "\n")
     return "OK", 200
 
@@ -1567,9 +1465,11 @@ def run_flask():
     app.run(host='0.0.0.0', port=port, debug=False)
 
 if __name__ == "__main__":
-    # Inicia Flask em uma thread separada
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
     flask_thread.start()
     
-    # Inicia o bot Discord
-    bot.run(DISCORD_TOKEN)
+    try:
+        bot.run(DISCORD_TOKEN)
+    except Exception as e:
+        print(f"❌ Erro ao iniciar bot: {e}")
