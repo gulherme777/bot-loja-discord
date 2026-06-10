@@ -122,7 +122,7 @@ def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
         payload = {
             "handle": INFINITE_TAG,
             "order_nsu": f"{produto_id}_{user_id}_{int(time.time())}",
-            "itens": [
+            "items": [
                 {
                     "quantity": 1,
                     "price": preco_centavos,
