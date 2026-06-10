@@ -26,7 +26,6 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", DISCORD_TOKEN)
-    MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN", MP_ACCESS_TOKEN)
 except ImportError:
     pass
 
@@ -34,15 +33,13 @@ except ImportError:
 if not DISCORD_TOKEN:
     print("❌ ERRO: DISCORD_TOKEN não encontrado!")
     print("Configure a variável de ambiente DISCORD_TOKEN no Render")
-    # No Render, não queremos dar exit(1) imediatamente se estivermos em build, 
-    # mas para execução é necessário.
     if os.environ.get("RENDER"):
         print("Aguardando configuração de ambiente...")
 
-WEBHOOK_URL = os.environ.get(
-    "WEBHOOK_URL",
-    f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/webhook"
-)
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+if not WEBHOOK_URL and os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
+    WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
+
 
 # Arquivos de dados
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
