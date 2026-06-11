@@ -406,9 +406,6 @@ class VariacoesView(discord.ui.View):
                 await interaction.followup.send(f"❌ Erro ao gerar pagamento: `{msg_erro}`", ephemeral=True)
                 return
             
-            # Aqui chamamos o log_carrinho_ativo de forma assíncrona mas que será executado na thread do bot
-            # Precisamos usar asyncio.create_task ou asyncio.ensure_future porque estamos em uma callback do discord
-            # mas await log_carrinho_ativo já é suficiente pois estamos em uma async def
             await log_carrinho_ativo(
                 user=user,
                 produto_nome=pix_data['produto'],
@@ -742,6 +739,33 @@ async def listar_variacoes(interaction: discord.Interaction, produto_id: str):
         print(f"❌ Erro ao listar variações: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
+@bot.tree.command(name="remover_variacao", description="[ADMIN] Remover uma variação de um produto")
+@app_commands.describe(produto_id="ID do produto", indice="Índice da variação (veja com /listar_variacoes)")
+async def remover_variacao(interaction: discord.Interaction, produto_id: str, indice: int):
+    try:
+        if interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+        
+        produto = produtos_disponiveis[produto_id]
+        variacoes = produto.get("variacoes", [])
+        
+        if indice < 0 or indice >= len(variacoes):
+            await interaction.response.send_message(f"❌ Índice `{indice}` inválido!", ephemeral=True)
+            return
+        
+        removida = variacoes.pop(indice)
+        salvar_produtos(produtos_disponiveis)
+        
+        await interaction.response.send_message(f"✅ Variação `{removida['nome']}` removida do produto `{produto['nome']}`!", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao remover variação: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
 @bot.tree.command(name="remover_estoque", description="🗑️ Remove itens específicos do estoque de um produto")
 @app_commands.describe(
     produto_id="ID do produto",
@@ -842,7 +866,12 @@ async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
             
         view = ProdutoCompraView(produto_id, produto_info['nome'], produto_info.get('variacoes', []))
         
-        await canal.purge(limit=5)
+        # Limpar mensagens do canal
+        try:
+            await canal.purge(limit=100)
+        except:
+            pass
+            
         await canal.send(embed=embed, view=view)
         
         await interaction.followup.send(f"✅ Canal sincronizado!", ephemeral=True)
@@ -852,6 +881,24 @@ async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
             await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
         except:
             pass
+
+@bot.tree.command(name="limpar", description="[ADMIN] Limpar mensagens do canal")
+@app_commands.describe(quantidade="Quantidade de mensagens a limpar")
+async def limpar_chat(interaction: discord.Interaction, quantidade: int = 100):
+    try:
+        if interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            deleted = await interaction.channel.purge(limit=quantidade)
+            await interaction.followup.send(f"✅ Foram removidas `{len(deleted)}` mensagens!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro ao limpar canal: {e}", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro no comando limpar: {e}")
 
 @bot.tree.command(name="configurar_2fa", description="[ADMIN] Configurar canal de 2FA com botão")
 async def configurar_2fa(interaction: discord.Interaction):
@@ -905,7 +952,7 @@ async def set_imagem(interaction: discord.Interaction, produto_id: str, url_imag
     nome="Nome do produto",
     preco="Preço em R$",
     descricao="Descrição do produto (use | para separar benefícios)",
-    tipo="Tipo: auto ou manual"
+    tipo="Tipo: auto or manual"
 )
 async def criar_produto(
     interaction: discord.Interaction,
@@ -950,6 +997,28 @@ async def criar_produto(
         )
     except Exception as e:
         print(f"❌ Erro ao criar produto: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="listar_produtos", description="[ADMIN] Listar todos os produtos")
+async def listar_produtos(interaction: discord.Interaction):
+    try:
+        if interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if not produtos_disponiveis:
+            await interaction.response.send_message("❌ Nenhum produto cadastrado!", ephemeral=True)
+            return
+            
+        descricao = ""
+        for pid, pinfo in produtos_disponiveis.items():
+            estoque = verificar_estoque(pid)
+            descricao += f"🆔 `{pid}` | **{pinfo['nome']}** | R$ {pinfo['preco']:.2f} | 📦 {estoque}\n"
+            
+        embed = discord.Embed(title="📦 PRODUTOS CADASTRADOS", description=descricao, color=0x2b2d31)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao listar produtos: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
 @bot.tree.command(name="editar_preco", description="[ADMIN] Alterar preço de um produto")
@@ -1032,6 +1101,11 @@ async def remover_produto(interaction: discord.Interaction, produto_id: str):
         
         produto = produtos_disponiveis.pop(produto_id)
         salvar_produtos(produtos_disponiveis)
+        
+        # Também remover do estoque se quiser limpar tudo
+        if produto_id in estoque_disponivel:
+            estoque_disponivel.pop(produto_id)
+            salvar_estoque(estoque_disponivel)
         
         await interaction.response.send_message(f"✅ Produto removido!\n📦 Removido: {produto['nome']}", ephemeral=True)
     except Exception as e:
