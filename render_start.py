@@ -185,8 +185,23 @@ def verificar_estoque(produto_id, variacao_nome=None):
     with estoque_lock:
         if produto_id not in estoque_disponivel:
             return 0
-        if variacao_nome and variacao_nome in estoque_disponivel[produto_id].get("variacoes", {}):
-            return len(estoque_disponivel[produto_id]["variacoes"][variacao_nome])
+        
+        # Se pedir uma variação específica
+        if variacao_nome:
+            return len(estoque_disponivel[produto_id].get("variacoes", {}).get(variacao_nome, []))
+        
+        # Se o produto tem variações cadastradas, somamos o estoque de todas as variações
+        produto_info = produtos_disponiveis.get(produto_id, {})
+        variacoes_cadastradas = produto_info.get("variacoes", [])
+        
+        if variacoes_cadastradas:
+            total = 0
+            estoque_vars = estoque_disponivel[produto_id].get("variacoes", {})
+            for v in variacoes_cadastradas:
+                total += len(estoque_vars.get(v["nome"], []))
+            return total
+            
+        # Se não tem variações, retorna o estoque geral
         return len(estoque_disponivel[produto_id].get("itens", []))
 
 # ===============================
@@ -391,6 +406,7 @@ class VariacoesView(discord.ui.View):
                 return
             
             try:
+                # O formato da ref será: PRODUTOID_VARIACAONOME_USERID_TIMESTAMP
                 pix_data = criar_pagamento_pix_com_preco(
                     user.id,
                     f"{self.produto_id}_{variacao['nome']}",
@@ -664,6 +680,40 @@ async def ver_estoque(interaction: discord.Interaction, produto_id: str, variaca
         print(f"❌ Erro ao ver estoque: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
+@bot.tree.command(name="ver_estoque_variacao", description="[ADMIN] Ver itens no estoque de uma variação específica")
+@app_commands.describe(produto_id="ID do produto", variacao="Nome exato da variação")
+async def ver_estoque_variacao(interaction: discord.Interaction, produto_id: str, variacao: str):
+    try:
+        if interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+            
+        itens = estoque_disponivel.get(produto_id, {}).get("variacoes", {}).get(variacao, [])
+        
+        if not itens:
+            await interaction.response.send_message(f"📦 **{variacao}**\n\nEstoque vazio!", ephemeral=True)
+            return
+        
+        descricao = ""
+        for i, item in enumerate(itens):
+            descricao += f"**Índice: `{i}`** - `{item}`\n"
+        
+        embed = discord.Embed(
+            title=f"📦 ESTOQUE - {variacao}",
+            description=descricao,
+            color=0x2b2d31
+        )
+        embed.set_footer(text=f"Total: {len(itens)} itens | Use /remover_estoque com este índice e nome da variação")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao ver estoque da variação: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
 @bot.tree.command(name="add_variacao", description="[ADMIN] Adicionar variação a um produto")
 @app_commands.describe(
     produto_id="ID do produto",
@@ -726,7 +776,8 @@ async def listar_variacoes(interaction: discord.Interaction, produto_id: str):
         
         descricao = ""
         for i, v in enumerate(variacoes):
-            descricao += f"**{i}** - `{v['nome']}` - R$ {v['preco']:.2f}\n"
+            qtd = verificar_estoque(produto_id, v["nome"])
+            descricao += f"**Índice: `{i}`** | Nome: `{v['nome']}` | Preço: R$ {v['preco']:.2f} | Estoque: `{qtd}`\n"
         
         embed = discord.Embed(
             title=f"🎮 VARIAÇÕES - {produto['nome']}",
@@ -1319,8 +1370,17 @@ def webhook():
                     if user and produto_id in produtos_disponiveis:
                         produto_info = produtos_disponiveis[produto_id]
                         
-                        # Se tiver variação na referência
-                        variacao_nome = partes[1] if len(partes) == 4 else None
+                        # Se tiver variação na referência (formato: PRODUTO_VARIACAO_USER_TIME)
+                        # O ref pode ter múltiplos '_' se o produto_id ou variacao_nome contiverem '_'
+                        # Mas pela lógica de criação: f"{produto_id}_{user_id}_{int(time.time())}" 
+                        # ou f"{self.produto_id}_{variacao['nome']}_{user.id}_{int(time.time())}"
+                        
+                        variacao_nome = None
+                        # Tentar extrair a variação se houver mais de 3 partes
+                        if len(partes) >= 4:
+                            # O produto_id é o primeiro, user_id é o penúltimo, time é o último
+                            # Tudo entre o primeiro e o penúltimo é a variação
+                            variacao_nome = "_".join(partes[1:-2])
                         
                         if produto_info.get("tipo") == "auto":
                             item = entregar_do_estoque(produto_id, variacao_nome=variacao_nome)
