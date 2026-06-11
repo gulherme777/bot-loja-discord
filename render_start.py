@@ -599,13 +599,13 @@ class ProdutoCompraView(discord.ui.View):
 @app_commands.describe(
     produto_id="ID do produto",
     itens="Itens separados por | (ex: conta1:senha1 | conta2:senha2)",
-    variacao="Nome da variação (opcional)"
+    variacao_indice="Índice da variação (veja em /listar_variacoes) ou deixe vazio para estoque geral"
 )
 async def add_estoque(
     interaction: discord.Interaction,
     produto_id: str,
     itens: str,
-    variacao: str = None
+    variacao_indice: int = -1
 ):
     try:
         if interaction.user.id != MEU_ID:
@@ -616,27 +616,39 @@ async def add_estoque(
             await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
             return
         
+        produto = produtos_disponiveis[produto_id]
+        variacao_nome = None
+        
+        # Se um índice foi fornecido, buscar o nome da variação
+        if variacao_indice != -1:
+            variacoes = produto.get("variacoes", [])
+            if 0 <= variacao_indice < len(variacoes):
+                variacao_nome = variacoes[variacao_indice]["nome"]
+            else:
+                await interaction.response.send_message(f"❌ Índice de variação `{variacao_indice}` inválido! Use `/listar_variacoes` para ver os índices.", ephemeral=True)
+                return
+
         novos_itens = [i.strip() for i in itens.split("|") if i.strip()]
         
         with estoque_lock:
             if produto_id not in estoque_disponivel:
                 estoque_disponivel[produto_id] = {"itens": [], "variacoes": {}}
             
-            if variacao:
+            if variacao_nome:
                 if "variacoes" not in estoque_disponivel[produto_id]:
                     estoque_disponivel[produto_id]["variacoes"] = {}
                 
-                if variacao not in estoque_disponivel[produto_id]["variacoes"]:
-                    estoque_disponivel[produto_id]["variacoes"][variacao] = []
+                if variacao_nome not in estoque_disponivel[produto_id]["variacoes"]:
+                    estoque_disponivel[produto_id]["variacoes"][variacao_nome] = []
                 
-                estoque_disponivel[produto_id]["variacoes"][variacao].extend(novos_itens)
+                estoque_disponivel[produto_id]["variacoes"][variacao_nome].extend(novos_itens)
             else:
                 estoque_disponivel[produto_id]["itens"].extend(novos_itens)
                 
             salvar_estoque(estoque_disponivel)
         
-        local = f"na variação `{variacao}`" if variacao else "no estoque geral"
-        await interaction.response.send_message(f"✅ {len(novos_itens)} itens adicionados {local} para `{produtos_disponiveis[produto_id]['nome']}`!", ephemeral=True)
+        local = f"na variação `{variacao_nome}`" if variacao_nome else "no estoque geral"
+        await interaction.response.send_message(f"✅ {len(novos_itens)} itens adicionados {local} para `{produto['nome']}`!", ephemeral=True)
     except Exception as e:
         print(f"❌ Erro ao adicionar estoque: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
