@@ -33,13 +33,10 @@ except ImportError:
 if not DISCORD_TOKEN:
     print("❌ ERRO CRÍTICO: DISCORD_TOKEN não encontrado nas variáveis de ambiente!")
     print("Por favor, adicione DISCORD_TOKEN no painel do Render.")
-    # Não vamos dar sys.exit para não entrar em loop infinito de crash no Render
-    # Mas o bot não vai rodar sem o token.
 
-WEBHOOK_URL = os.environ.get(
-    "WEBHOOK_URL",
-    f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/webhook"
-)
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+if not WEBHOOK_URL and os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
+    WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
 
 # Arquivos de dados
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
@@ -150,9 +147,7 @@ def verificar_estoque(produto_id, variacao_nome=None):
 async def log_carrinho_ativo(user, produto_nome, valor, pagamento_id):
     try:
         canal = bot.get_channel(CANAL_CARRINHOS)
-        if not canal: 
-            print(f"⚠️ Canal de carrinhos ({CANAL_CARRINHOS}) não encontrado.")
-            return None
+        if not canal: return None
         embed = discord.Embed(title="🛒 NOVO CARRINHO ATIVO", color=0xffaa00, timestamp=datetime.now())
         embed.add_field(name="Cliente", value=user.mention, inline=True)
         embed.add_field(name="Produto", value=produto_nome, inline=True)
@@ -176,8 +171,6 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
             if item_entregue:
                 embed.add_field(name="🔐 Item Entregue", value=f"```{item_entregue}```", inline=False)
             await canal_pagos.send(embed=embed)
-        else:
-            print(f"⚠️ Canal de pagos ({CANAL_PAGOS}) não encontrado.")
             
         if str(pagamento_id) in carrinhos_ativos:
             dados = carrinhos_ativos[str(pagamento_id)]
@@ -313,18 +306,6 @@ async def configurar_produto(interaction: discord.Interaction, canal: discord.Te
     await interaction.response.send_message("✅ Configurado!", ephemeral=True)
 
 # ===============================
-# KEEP ALIVE
-# ===============================
-def keep_alive_ping():
-    url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/"
-    while True:
-        try:
-            time.sleep(600)
-            if "localhost" not in url:
-                requests.get(url, timeout=10)
-        except: pass
-
-# ===============================
 # WEBHOOK & FLASK
 # ===============================
 app = Flask(__name__)
@@ -360,7 +341,6 @@ def webhook():
                         item = entregar_do_estoque(p_id, v_nome) if p_info.get("tipo") == "auto" else None
                         msg = f"✅ **Sua compra chegou!**\n\n📦 **{p_info['nome']}**\n\n🔐 **Produto:**\n```{item}```" if item else f"✅ Pagamento confirmado para **{p_info['nome']}**! Entrega manual em breve."
                         asyncio.run_coroutine_threadsafe(user.send(msg), bot.loop)
-                        # Log no canal de pagos
                         asyncio.run_coroutine_threadsafe(log_pagamento_confirmado(user, p_info['nome'], data.get('amount', 0)/100, payment_id, item), bot.loop)
         except Exception as e: print(f"❌ Erro Webhook: {e}")
     return "OK", 200
@@ -372,7 +352,6 @@ def run_flask():
 if __name__ == "__main__":
     if DISCORD_TOKEN:
         threading.Thread(target=run_flask, daemon=True).start()
-        threading.Thread(target=keep_alive_ping, daemon=True).start()
         print("🚀 Iniciando Bot...")
         while True:
             try:
@@ -382,5 +361,4 @@ if __name__ == "__main__":
                 time.sleep(15)
     else:
         print("❌ Bot não pode ser iniciado sem DISCORD_TOKEN.")
-        # Mantém o Flask vivo para o Render não dar erro de porta
         run_flask()
