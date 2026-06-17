@@ -1009,6 +1009,9 @@ async def sincronizar_canal(
         except Exception as e:
             print(f"❌ Erro ao sincronizar canal: {e}")
             await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro geral em sincronizar_canal: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
 @bot.tree.command(name="set_imagem_produto", description="[ADMIN] Define a imagem de um produto")
 @app_commands.describe(
