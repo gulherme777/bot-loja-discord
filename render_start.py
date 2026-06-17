@@ -42,7 +42,7 @@ if not DISCORD_TOKEN:
 
 WEBHOOK_URL = os.environ.get(
     "WEBHOOK_URL",
-    f"https://{os.environ.get("RENDER_EXTERNAL_HOSTNAME", "localhost")}/webhook"
+    f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/webhook"
 )
 
 # Arquivos de dados
