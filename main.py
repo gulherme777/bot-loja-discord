@@ -19,27 +19,49 @@ print("🔧 Iniciando bot da G7 STORE...")
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 INFINITE_TAG = "guilherme_vinicius90"
 
-# Se estiver testando localmente com .env
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", DISCORD_TOKEN)
-except ImportError:
-    pass
+# Tentar carregar .env apenas se estiver em desenvolvimento local
+if not DISCORD_TOKEN and os.path.exists('.env'):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
+        print("✅ .env carregado com sucesso")
+    except ImportError:
+        print("⚠️ python-dotenv não encontrado, usando variáveis de ambiente")
 
-# Verificar se o token existe
+# Verificar token
 if not DISCORD_TOKEN:
     print("❌ ERRO CRÍTICO: DISCORD_TOKEN não encontrado!")
-    print("Por favor, configure o DISCORD_TOKEN no painel do Render.")
+    print("Configure a variável de ambiente DISCORD_TOKEN no Render")
+    sys.exit(1)
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
 if not WEBHOOK_URL and os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
     WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
 
-# Arquivos de dados
+# ===============================
+# INICIALIZAÇÃO DOS ARQUIVOS
+# ===============================
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
 ARQUIVO_ESTOQUE_JSON = "estoque.json"
 ARQUIVO_PAGAMENTOS_PROCESSADOS = "pagamentos.json"
+
+# Criar arquivos padrão se não existirem
+def inicializar_arquivos():
+    """Cria arquivos JSON com estrutura padrão se não existirem"""
+    arquivos_padrao = {
+        ARQUIVO_PRODUTOS_JSON: {},
+        ARQUIVO_ESTOQUE_JSON: {},
+        ARQUIVO_PAGAMENTOS_PROCESSADOS: []
+    }
+    
+    for arquivo, conteudo in arquivos_padrao.items():
+        if not os.path.exists(arquivo):
+            with open(arquivo, 'w', encoding='utf-8') as f:
+                json.dump(conteudo, f, indent=2, ensure_ascii=False)
+            print(f"✅ Arquivo {arquivo} criado")
+
+inicializar_arquivos()
 
 # IDs do Discord
 GUILD_ID = 1472114509068898367
@@ -63,6 +85,7 @@ def carregar_json(caminho, default=None):
                 return json.load(f)
         except Exception as e:
             print(f"❌ Erro ao carregar {caminho}: {e}")
+            return default if default is not None else {}
     return default if default is not None else {}
 
 def salvar_json(caminho, dados):
@@ -265,10 +288,13 @@ class Bot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        guild = discord.Object(id=GUILD_ID)
-        self.tree.copy_global_to(guild=guild)
-        await self.tree.sync(guild=guild)
-        print("✅ Slash commands sincronizados")
+        try:
+            guild = discord.Object(id=GUILD_ID)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            print("✅ Slash commands sincronizados")
+        except Exception as e:
+            print(f"❌ Erro ao sincronizar comandos: {e}")
 
     async def on_ready(self):
         print(f"🟢 Logado como {self.user}")
@@ -281,13 +307,21 @@ bot = Bot()
 # ===============================
 @bot.tree.command(name="add_estoque", description="[ADMIN] Adicionar itens ao estoque")
 async def add_estoque(interaction: discord.Interaction, produto_id: str, itens: str, variacao_indice: int = -1):
-    if interaction.user.id != MEU_ID: return
+    if interaction.user.id != MEU_ID:
+        await interaction.response.send_message("❌ Apenas o dono pode usar este comando!", ephemeral=True)
+        return
+    
     novos = [i.strip() for i in itens.split("|") if i.strip()]
     with estoque_lock:
-        if produto_id not in estoque_disponivel: estoque_disponivel[produto_id] = {"itens": [], "variacoes": {}}
+        if produto_id not in estoque_disponivel: 
+            estoque_disponivel[produto_id] = {"itens": [], "variacoes": {}}
         if variacao_indice >= 0:
+            if produto_id not in produtos_disponiveis:
+                await interaction.response.send_message("❌ Produto não encontrado!", ephemeral=True)
+                return
             v_nome = produtos_disponiveis[produto_id]["variacoes"][variacao_indice]["nome"]
-            if v_nome not in estoque_disponivel[produto_id]["variacoes"]: estoque_disponivel[produto_id]["variacoes"][v_nome] = []
+            if v_nome not in estoque_disponivel[produto_id]["variacoes"]: 
+                estoque_disponivel[produto_id]["variacoes"][v_nome] = []
             estoque_disponivel[produto_id]["variacoes"][v_nome].extend(novos)
         else:
             estoque_disponivel[produto_id]["itens"].extend(novos)
@@ -296,7 +330,14 @@ async def add_estoque(interaction: discord.Interaction, produto_id: str, itens: 
 
 @bot.tree.command(name="configurar_produto", description="[ADMIN] Enviar mensagem de compra")
 async def configurar_produto(interaction: discord.Interaction, canal: discord.TextChannel, produto_id: str):
-    if interaction.user.id != MEU_ID: return
+    if interaction.user.id != MEU_ID:
+        await interaction.response.send_message("❌ Apenas o dono pode usar este comando!", ephemeral=True)
+        return
+    
+    if produto_id not in produtos_disponiveis:
+        await interaction.response.send_message("❌ Produto não encontrado!", ephemeral=True)
+        return
+        
     p_info = produtos_disponiveis[produto_id]
     embed = await criar_embed_produto_tzada(produto_id, p_info)
     view = ProdutoCompraView(produto_id, p_info["nome"], p_info.get("variacoes", []))
@@ -314,15 +355,20 @@ def home():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json if request.is_json else {}
-    payment_id = data.get('invoice_slug')
-    ref = data.get('order_nsu', '')
-    if not payment_id: return "OK", 200
-    with webhook_lock:
-        if str(payment_id) in pagamentos_processados: return "OK", 200
-        try:
+    try:
+        data = request.json if request.is_json else {}
+        payment_id = data.get('invoice_slug')
+        ref = data.get('order_nsu', '')
+        if not payment_id: 
+            return "OK", 200
+            
+        with webhook_lock:
+            if str(payment_id) in pagamentos_processados: 
+                return "OK", 200
+                
             pagamentos_processados.add(str(payment_id))
             salvar_pagamentos_processados(pagamentos_processados)
+            
             if ref:
                 partes = ref.split('_')
                 if len(partes) >= 3:
@@ -333,30 +379,41 @@ def webhook():
                         try:
                             future = asyncio.run_coroutine_threadsafe(bot.fetch_user(u_id), bot.loop)
                             user = future.result(timeout=10)
-                        except: pass
+                        except Exception as e:
+                            print(f"❌ Erro ao buscar usuário: {e}")
+                    
                     if user and p_id in produtos_disponiveis:
                         p_info = produtos_disponiveis[p_id]
                         item = entregar_do_estoque(p_id, v_nome) if p_info.get("tipo") == "auto" else None
                         msg = f"✅ **Sua compra chegou!**\n\n📦 **{p_info['nome']}**\n\n🔐 **Produto:**\n```{item}```" if item else f"✅ Pagamento confirmado para **{p_info['nome']}**! Entrega manual em breve."
                         asyncio.run_coroutine_threadsafe(user.send(msg), bot.loop)
                         asyncio.run_coroutine_threadsafe(log_pagamento_confirmado(user, p_info['nome'], data.get('amount', 0)/100, payment_id, item), bot.loop)
-        except Exception as e: print(f"❌ Erro Webhook: {e}")
+    except Exception as e:
+        print(f"❌ Erro Webhook: {e}")
     return "OK", 200
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
+# ===============================
+# MAIN
+# ===============================
 if __name__ == "__main__":
-    if DISCORD_TOKEN:
-        threading.Thread(target=run_flask, daemon=True).start()
-        print("🚀 Iniciando Bot...")
-        while True:
-            try:
-                bot.run(DISCORD_TOKEN)
-            except Exception as e:
-                print(f"🧨 Erro de conexão: {e}. Reiniciando em 15s...")
-                time.sleep(15)
-    else:
-        print("❌ Bot não pode ser iniciado sem DISCORD_TOKEN.")
-        run_flask()
+    print("🚀 Iniciando Bot G7 STORE...")
+    
+    # Iniciar Flask em thread separada
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    print("✅ Flask iniciado")
+    
+    # Iniciar Bot com reconexão automática
+    while True:
+        try:
+            bot.run(DISCORD_TOKEN)
+        except discord.LoginFailure:
+            print("❌ Token inválido! Verifique o DISCORD_TOKEN")
+            break
+        except Exception as e:
+            print(f"🧨 Erro: {e}. Reiniciando em 15s...")
+            time.sleep(15)
