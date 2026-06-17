@@ -38,10 +38,11 @@ if not DISCORD_TOKEN:
     # mas para execução é necessário.
     if os.environ.get("RENDER"):
         print("Aguardando configuração de ambiente...")
+    sys.exit(1) # Adicionado para garantir que o bot não continue sem token
 
 WEBHOOK_URL = os.environ.get(
     "WEBHOOK_URL",
-    f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/webhook"
+    f"https://{os.environ.get("RENDER_EXTERNAL_HOSTNAME", "localhost")}/webhook"
 )
 
 # Arquivos de dados
@@ -74,36 +75,51 @@ def carregar_pagamentos_processados():
         try:
             with open(ARQUIVO_PAGAMENTOS_PROCESSADOS, 'r', encoding='utf-8') as f:
                 return set(json.load(f))
-        except: return set()
+        except Exception as e:
+            print(f"❌ Erro ao carregar pagamentos processados: {e}")
+            return set()
     return set()
 
 def salvar_pagamentos_processados(pagamentos):
-    with open(ARQUIVO_PAGAMENTOS_PROCESSADOS, 'w', encoding='utf-8') as f:
-        json.dump(list(pagamentos), f, indent=2)
+    try:
+        with open(ARQUIVO_PAGAMENTOS_PROCESSADOS, 'w', encoding='utf-8') as f:
+            json.dump(list(pagamentos), f, indent=2)
+    except Exception as e:
+        print(f"❌ Erro ao salvar pagamentos processados: {e}")
 
 def carregar_estoque():
     if os.path.exists(ARQUIVO_ESTOQUE_JSON):
         try:
             with open(ARQUIVO_ESTOQUE_JSON, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except: return {}
+        except Exception as e:
+            print(f"❌ Erro ao carregar estoque: {e}")
+            return {}
     return {}
 
 def salvar_estoque(estoque):
-    with open(ARQUIVO_ESTOQUE_JSON, 'w', encoding='utf-8') as f:
-        json.dump(estoque, f, indent=2, ensure_ascii=False)
+    try:
+        with open(ARQUIVO_ESTOQUE_JSON, 'w', encoding='utf-8') as f:
+            json.dump(estoque, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"❌ Erro ao salvar estoque: {e}")
 
 def carregar_produtos():
     if os.path.exists(ARQUIVO_PRODUTOS_JSON):
         try:
             with open(ARQUIVO_PRODUTOS_JSON, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except: return {}
+        except Exception as e:
+            print(f"❌ Erro ao carregar produtos: {e}")
+            return {}
     return {}
 
 def salvar_produtos(produtos):
-    with open(ARQUIVO_PRODUTOS_JSON, 'w', encoding='utf-8') as f:
-        json.dump(produtos, f, indent=2, ensure_ascii=False)
+    try:
+        with open(ARQUIVO_PRODUTOS_JSON, 'w', encoding='utf-8') as f:
+            json.dump(produtos, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"❌ Erro ao salvar produtos: {e}")
 
 pagamentos_processados = carregar_pagamentos_processados()
 estoque_disponivel = carregar_estoque()
@@ -112,7 +128,6 @@ produtos_disponiveis = carregar_produtos()
 # ===============================
 # INFINITEPAY
 # ===============================
-
 
 def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
     try:
@@ -267,8 +282,11 @@ class Bot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        await self.tree.sync()
-        print("✅ Slash commands sincronizados")
+        # Sincroniza comandos apenas para a GUILD_ID específica
+        guild = discord.Object(id=GUILD_ID)
+        self.tree.copy_global_to(guild=guild)
+        await self.tree.sync(guild=guild)
+        print("✅ Slash commands sincronizados para a guild específica")
 
     async def on_ready(self):
         print(f"🟢 Logado como {self.user}")
@@ -382,7 +400,7 @@ class VariacoesView(discord.ui.View):
         select = discord.ui.Select(
             placeholder="Escolha uma opção...",
             options=options,
-            custom_id="select_variacao"
+            custom_id="select_variacao" # Adicionado custom_id
         )
         select.callback = self.select_callback
         self.add_item(select)
@@ -719,24 +737,24 @@ async def ver_estoque_variacao(interaction: discord.Interaction, produto_id: str
             description=descricao,
             color=0x2b2d31
         )
-        embed.set_footer(text=f"Total: {len(itens)} itens | Use /remover_estoque com este índice e nome da variação")
+        embed.set_footer(text=f"Total: {len(itens)} itens | Use /remover_estoque com o índice")
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
-        print(f"❌ Erro ao ver estoque da variação: {e}")
+        print(f"❌ Erro ao ver estoque de variação: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
-@bot.tree.command(name="add_variacao", description="[ADMIN] Adicionar variação a um produto")
+@bot.tree.command(name="remover_estoque", description="[ADMIN] Remover item do estoque por índice")
 @app_commands.describe(
     produto_id="ID do produto",
-    nome="Nome da variação (ex: Completo, Apenas Conta, Premium)",
-    preco="Preço da variação em R$"
+    indice="Índice do item a remover (use /ver_estoque para ver)",
+    variacao_indice="Índice da variação (opcional, use /listar_variacoes para ver)"
 )
-async def add_variacao(
+async def remover_estoque(
     interaction: discord.Interaction,
     produto_id: str,
-    nome: str,
-    preco: float
+    indice: int,
+    variacao_indice: int = -1
 ):
     try:
         if interaction.user.id != MEU_ID:
@@ -747,24 +765,147 @@ async def add_variacao(
             await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
             return
         
-        if "variacoes" not in produtos_disponiveis[produto_id]:
-            produtos_disponiveis[produto_id]["variacoes"] = []
+        produto = produtos_disponiveis[produto_id]
+        variacao_nome = None
+
+        if variacao_indice != -1:
+            variacoes = produto.get("variacoes", [])
+            if 0 <= variacao_indice < len(variacoes):
+                variacao_nome = variacoes[variacao_indice]["nome"]
+            else:
+                await interaction.response.send_message(f"❌ Índice de variação `{variacao_indice}` inválido! Use `/listar_variacoes` para ver os índices.", ephemeral=True)
+                return
+
+        with estoque_lock:
+            if produto_id not in estoque_disponivel:
+                await interaction.response.send_message(f"❌ Estoque para `{produto['nome']}` não encontrado!", ephemeral=True)
+                return
+            
+            itens_list = []
+            if variacao_nome:
+                if variacao_nome not in estoque_disponivel[produto_id].get("variacoes", {}):
+                    await interaction.response.send_message(f"❌ Variação `{variacao_nome}` não encontrada no estoque de `{produto['nome']}`!", ephemeral=True)
+                    return
+                itens_list = estoque_disponivel[produto_id]["variacoes"][variacao_nome]
+            else:
+                itens_list = estoque_disponivel[produto_id]["itens"]
+
+            if not itens_list:
+                await interaction.response.send_message(f"❌ Estoque vazio para `{produto['nome']}`!", ephemeral=True)
+                return
+
+            if indice < 0 or indice >= len(itens_list):
+                await interaction.response.send_message(f"❌ Índice inválido! Use 0 a {len(itens_list)-1} ou /ver_estoque para ver os índices.", ephemeral=True)
+                return
+            
+            item_removido = itens_list.pop(indice)
+            salvar_estoque(estoque_disponivel)
         
-        produtos_disponiveis[produto_id]["variacoes"].append({
-            "nome": nome,
-            "preco": preco
-        })
+        local = f"da variação `{variacao_nome}`" if variacao_nome else "do estoque geral"
+        await interaction.response.send_message(f"✅ Item removido {local} de `{produto['nome']}`: `{item_removido}`", ephemeral=True)
+    except Exception as e:
+        print(f"❌ Erro ao remover estoque: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="add_variacao", description="[ADMIN] Adicionar variação a um produto")
+@app_commands.describe(
+    produto_id="ID do produto",
+    nome_variacao="Nome da variação (ex: '1 Mês', 'Vitalício')",
+    preco_variacao="Preço da variação em R$"
+)
+async def add_variacao(
+    interaction: discord.Interaction,
+    produto_id: str,
+    nome_variacao: str,
+    preco_variacao: float
+):
+    try:
+        if interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+        
+        produto = produtos_disponiveis[produto_id]
+        
+        if "variacoes" not in produto:
+            produto["variacoes"] = []
+            
+        # Verificar se a variação já existe
+        for var in produto["variacoes"]:
+            if var["nome"] == nome_variacao:
+                await interaction.response.send_message(f"❌ Variação `{nome_variacao}` já existe para este produto!", ephemeral=True)
+                return
+
+        produto["variacoes"].append({"nome": nome_variacao, "preco": preco_variacao})
         salvar_produtos(produtos_disponiveis)
         
+        # Inicializar estoque para a nova variação, se o produto for auto
+        if produto.get("tipo") == "auto":
+            with estoque_lock:
+                if produto_id not in estoque_disponivel:
+                    estoque_disponivel[produto_id] = {"itens": [], "variacoes": {}}
+                if "variacoes" not in estoque_disponivel[produto_id]:
+                    estoque_disponivel[produto_id]["variacoes"] = {}
+                estoque_disponivel[produto_id]["variacoes"][nome_variacao] = []
+                salvar_estoque(estoque_disponivel)
+
         await interaction.response.send_message(
-            f"✅ Variação adicionada!\n\n"
-            f"📦 Produto: {produtos_disponiveis[produto_id]['nome']}\n"
-            f"🎮 Opção: {nome}\n"
-            f"💰 Preço: R$ {preco:.2f}",
+            f"✅ Variação `{nome_variacao}` (R$ {preco_variacao:.2f}) adicionada ao produto `{produto['nome']}`!",
             ephemeral=True
         )
     except Exception as e:
         print(f"❌ Erro ao adicionar variação: {e}")
+        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
+
+@bot.tree.command(name="remover_variacao", description="[ADMIN] Remover variação de um produto")
+@app_commands.describe(
+    produto_id="ID do produto",
+    indice_variacao="Índice da variação a remover (use /listar_variacoes para ver)"
+)
+async def remover_variacao(
+    interaction: discord.Interaction,
+    produto_id: str,
+    indice_variacao: int
+):
+    try:
+        if interaction.user.id != MEU_ID:
+            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+            return
+        
+        if produto_id not in produtos_disponiveis:
+            await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            return
+        
+        produto = produtos_disponiveis[produto_id]
+        
+        if "variacoes" not in produto or not produto["variacoes"]:
+            await interaction.response.send_message(f"❌ Produto `{produto['nome']}` não possui variações!", ephemeral=True)
+            return
+        
+        if not (0 <= indice_variacao < len(produto["variacoes"])):
+            await interaction.response.send_message(f"❌ Índice de variação inválido! Use 0 a {len(produto['variacoes'])-1}.", ephemeral=True)
+            return
+        
+        variacao_removida = produto["variacoes"].pop(indice_variacao)
+        salvar_produtos(produtos_disponiveis)
+
+        # Remover estoque da variação também
+        if produto.get("tipo") == "auto":
+            with estoque_lock:
+                if produto_id in estoque_disponivel and "variacoes" in estoque_disponivel[produto_id]:
+                    if variacao_removida["nome"] in estoque_disponivel[produto_id]["variacoes"]:
+                        del estoque_disponivel[produto_id]["variacoes"][variacao_removida["nome"]]
+                        salvar_estoque(estoque_disponivel)
+
+        await interaction.response.send_message(
+            f"✅ Variação `{variacao_removida['nome']}` removida do produto `{produto['nome']}`!",
+            ephemeral=True
+        )
+    except Exception as e:
+        print(f"❌ Erro ao remover variação: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
 @bot.tree.command(name="listar_variacoes", description="[ADMIN] Listar variações de um produto")
@@ -780,31 +921,32 @@ async def listar_variacoes(interaction: discord.Interaction, produto_id: str):
             return
         
         produto = produtos_disponiveis[produto_id]
-        variacoes = produto.get("variacoes", [])
         
-        if not variacoes:
-            await interaction.response.send_message(f"📦 **{produto['nome']}**\n\nNenhuma variação encontrada!", ephemeral=True)
+        if "variacoes" not in produto or not produto["variacoes"]:
+            await interaction.response.send_message(f"❌ Produto `{produto['nome']}` não possui variações cadastradas!", ephemeral=True)
             return
-        
+            
         descricao = ""
-        for i, v in enumerate(variacoes):
-            qtd = verificar_estoque(produto_id, v["nome"])
-            descricao += f"**Índice: `{i}`** | Nome: `{v['nome']}` | Preço: R$ {v['preco']:.2f} | Estoque: `{qtd}`\n"
-        
-        embed = discord.Embed(
-            title=f"🎮 VARIAÇÕES - {produto['nome']}",
-            description=descricao,
-            color=0x2b2d31
-        )
-        
+        for i, var in enumerate(produto["variacoes"]):
+            estoque_var = verificar_estoque(produto_id, var["nome"])
+            descricao += f"**Índice: `{i}`** | `{var['nome']}` | R$ {var['preco']:.2f} | 📦 {estoque_var}\n"
+            
+        embed = discord.Embed(title=f"📊 VARIAÇÕES - {produto['nome']}", description=descricao, color=0x2b2d31)
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
         print(f"❌ Erro ao listar variações: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
-@bot.tree.command(name="remover_variacao", description="[ADMIN] Remover uma variação de um produto")
-@app_commands.describe(produto_id="ID do produto", indice="Índice da variação (veja com /listar_variacoes)")
-async def remover_variacao(interaction: discord.Interaction, produto_id: str, indice: int):
+@bot.tree.command(name="configurar_produto", description="[ADMIN] Enviar mensagem de compra de produto para um canal")
+@app_commands.describe(
+    canal="Canal onde a mensagem será enviada",
+    produto_id="ID do produto a ser configurado"
+)
+async def configurar_produto(
+    interaction: discord.Interaction,
+    canal: discord.TextChannel,
+    produto_id: str
+):
     try:
         if interaction.user.id != MEU_ID:
             await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
@@ -814,181 +956,70 @@ async def remover_variacao(interaction: discord.Interaction, produto_id: str, in
             await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
             return
         
-        produto = produtos_disponiveis[produto_id]
-        variacoes = produto.get("variacoes", [])
+        produto_info = produtos_disponiveis[produto_id]
         
-        if indice < 0 or indice >= len(variacoes):
-            await interaction.response.send_message(f"❌ Índice `{indice}` inválido!", ephemeral=True)
+        embed_produto = await criar_embed_produto_tzada(produto_id, produto_info)
+        if not embed_produto:
+            await interaction.response.send_message("❌ Erro ao criar embed do produto.", ephemeral=True)
             return
         
-        removida = variacoes.pop(indice)
-        salvar_produtos(produtos_disponiveis)
-        
-        await interaction.response.send_message(f"✅ Variação `{removida['nome']}` removida do produto `{produto['nome']}`!", ephemeral=True)
+        view = ProdutoCompraView(produto_id, produto_info["nome"], produto_info.get("variacoes", []))
+        await canal.send(embed=embed_produto, view=view)
+        await interaction.response.send_message(f"✅ Mensagem do produto `{produto_info['nome']}` enviada para {canal.mention}!", ephemeral=True)
     except Exception as e:
-        print(f"❌ Erro ao remover variação: {e}")
+        print(f"❌ Erro ao configurar produto: {e}")
         await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
-@bot.tree.command(name="remover_estoque", description="🗑️ Remove itens específicos do estoque de um produto")
+@bot.tree.command(name="sincronizar_canal", description="[ADMIN] Sincroniza a mensagem de um produto em um canal")
 @app_commands.describe(
-    produto_id="ID do produto",
-    indice="Número do item a remover (veja com /ver_estoque)",
-    variacao="Nome da variação (deixe em branco para produto sem variações)"
+    canal="Canal onde a mensagem está",
+    mensagem_id="ID da mensagem do produto",
+    produto_id="ID do produto"
 )
-async def remover_estoque(interaction: discord.Interaction, produto_id: str, indice: int, variacao: str = None):
-    await interaction.response.defer(ephemeral=True)
-    
-    try:
-        # Verificar se é admin
-        if interaction.user.id != MEU_ID and CARGO_ADMIN not in [role.id for role in interaction.user.roles]:
-            await interaction.followup.send("❌ Apenas administradores podem remover estoque!", ephemeral=True)
-            return
-        
-        # Verificar se o produto existe
-        if produto_id not in estoque_disponivel:
-            await interaction.followup.send(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
-            return
-        
-        with estoque_lock:
-            produto_estoque = estoque_disponivel[produto_id]
-            
-            # Se tem variação
-            if variacao:
-                if variacao not in produto_estoque.get("variacoes", {}):
-                    await interaction.followup.send(f"❌ Variação `{variacao}` não encontrada para o produto `{produto_id}`!", ephemeral=True)
-                    return
-                
-                lista_itens = produto_estoque["variacoes"][variacao]
-                
-                # Validar o índice
-                if indice < 0 or indice >= len(lista_itens):
-                    await interaction.followup.send(
-                        f"❌ Índice `{indice}` inválido! O estoque tem apenas **{len(lista_itens)}** itens (0 a {len(lista_itens)-1}).",
-                        ephemeral=True
-                    )
-                    return
-                
-                # Remover o item específico
-                item_removido = lista_itens.pop(indice)
-                salvar_estoque(estoque_disponivel)
-                
-                await interaction.followup.send(
-                    f"✅ Item **#{indice}** removido da variação `{variacao}` do produto `{produto_id}`!\n"
-                    f"🗑️ Item removido: `{item_removido}`\n"
-                    f"📦 Estoque restante: **{len(lista_itens)}** itens",
-                    ephemeral=True
-                )
-            else:
-                # Sem variação
-                lista_itens = produto_estoque.get("itens", [])
-                
-                # Validar o índice
-                if indice < 0 or indice >= len(lista_itens):
-                    await interaction.followup.send(
-                        f"❌ Índice `{indice}` inválido! O estoque tem apenas **{len(lista_itens)}** itens (0 a {len(lista_itens)-1}).",
-                        ephemeral=True
-                    )
-                    return
-                
-                # Remover o item específico
-                item_removido = lista_itens.pop(indice)
-                salvar_estoque(estoque_disponivel)
-                
-                await interaction.followup.send(
-                    f"✅ Item **#{indice}** removido do produto `{produto_id}`!\n"
-                    f"🗑️ Item removido: `{item_removido}`\n"
-                    f"📦 Estoque restante: **{len(lista_itens)}** itens",
-                    ephemeral=True
-                )
-    except Exception as e:
-        print(f"❌ Erro ao remover estoque: {e}")
-        await interaction.followup.send(f"❌ Erro ao remover estoque: {e}", ephemeral=True)
-
-
-@bot.tree.command(name="sincronizar_canal", description="[ADMIN] Atualizar embed de um canal existente")
-@app_commands.describe(produto_id="ID do produto")
-async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
+async def sincronizar_canal(
+    interaction: discord.Interaction,
+    canal: discord.TextChannel,
+    mensagem_id: str,
+    produto_id: str
+):
     try:
         if interaction.user.id != MEU_ID:
             await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
             return
         
-        await interaction.response.defer(ephemeral=True)
-        
         if produto_id not in produtos_disponiveis:
-            await interaction.followup.send(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
+            await interaction.response.send_message(f"❌ Produto `{produto_id}` não encontrado!", ephemeral=True)
             return
         
         produto_info = produtos_disponiveis[produto_id]
-        canal = interaction.channel
         
-        embed = await criar_embed_produto_tzada(produto_id, produto_info)
-        if not embed:
-            await interaction.followup.send("❌ Erro ao criar embed do produto.", ephemeral=True)
-            return
-            
-        view = ProdutoCompraView(produto_id, produto_info['nome'], produto_info.get('variacoes', []))
-        
-        # Limpar mensagens do canal
-        try:
-            await canal.purge(limit=100)
-        except:
-            pass
-            
-        await canal.send(embed=embed, view=view)
-        
-        await interaction.followup.send(f"✅ Canal sincronizado!", ephemeral=True)
-    except Exception as e:
-        print(f"❌ Erro ao sincronizar canal: {e}")
-        try:
-            await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
-        except:
-            pass
-
-@bot.tree.command(name="limpar", description="[ADMIN] Limpar mensagens do canal")
-@app_commands.describe(quantidade="Quantidade de mensagens a limpar")
-async def limpar_chat(interaction: discord.Interaction, quantidade: int = 100):
-    try:
-        if interaction.user.id != MEU_ID:
-            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
+        embed_produto = await criar_embed_produto_tzada(produto_id, produto_info)
+        if not embed_produto:
+            await interaction.response.send_message("❌ Erro ao criar embed do produto.", ephemeral=True)
             return
         
-        await interaction.response.defer(ephemeral=True)
+        view = ProdutoCompraView(produto_id, produto_info["nome"], produto_info.get("variacoes", []))
         
         try:
-            deleted = await interaction.channel.purge(limit=quantidade)
-            await interaction.followup.send(f"✅ Foram removidas `{len(deleted)}` mensagens!", ephemeral=True)
+            mensagem = await canal.fetch_message(int(mensagem_id))
+            await mensagem.edit(embed=embed_produto, view=view)
+            await interaction.response.send_message(f"✅ Mensagem do produto `{produto_info['nome']}` sincronizada no canal {canal.mention}!", ephemeral=True)
+        except discord.NotFound:
+            await interaction.response.send_message("❌ Mensagem não encontrada no canal especificado.", ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"❌ Erro ao limpar canal: {e}", ephemeral=True)
-    except Exception as e:
-        print(f"❌ Erro no comando limpar: {e}")
+            print(f"❌ Erro ao sincronizar canal: {e}")
+            await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
 
-@bot.tree.command(name="configurar_2fa", description="[ADMIN] Configurar canal de 2FA com botão")
-async def configurar_2fa(interaction: discord.Interaction):
-    try:
-        if interaction.user.id != MEU_ID:
-            await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
-            return
-        
-        embed = discord.Embed(
-            title="🔐 GERADOR DE CÓDIGO 2FA",
-            description="Clique no botão abaixo para gerar seu código 2FA de forma rápida e segura.\n\n"
-                        "1️⃣ Clique em **Gerar Código 2FA**\n"
-                        "2️⃣ Cole sua chave secreta\n"
-                        "3️⃣ O bot enviará o código atual para você!",
-            color=0x00ff88
-        )
-        embed.set_footer(text="G7 STORE - Segurança em primeiro lugar")
-        
-        await interaction.channel.send(embed=embed, view=Canal2FAView())
-        await interaction.response.send_message("✅ Canal de 2FA configurado!", ephemeral=True)
-    except Exception as e:
-        print(f"❌ Erro ao configurar 2FA: {e}")
-        await interaction.response.send_message(f"❌ Erro: {e}", ephemeral=True)
-
-@bot.tree.command(name="set_imagem", description="[ADMIN] Definir imagem de um produto")
-@app_commands.describe(produto_id="ID do produto", url_imagem="URL da imagem")
-async def set_imagem(interaction: discord.Interaction, produto_id: str, url_imagem: str):
+@bot.tree.command(name="set_imagem_produto", description="[ADMIN] Define a imagem de um produto")
+@app_commands.describe(
+    produto_id="ID do produto",
+    url_imagem="URL da imagem (deve ser um link direto)"
+)
+async def set_imagem_produto(
+    interaction: discord.Interaction,
+    produto_id: str,
+    url_imagem: str
+):
     try:
         if interaction.user.id != MEU_ID:
             await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
@@ -1344,7 +1375,6 @@ def home():
 def webhook():
     print("\n" + "⚡" * 20)
     print(f"WEBHOOK INFINITEPAY RECEBIDO ÀS {datetime.now().strftime('%H:%M:%S')}")
-    
     data = request.json if request.is_json else {}
     print(f"📩 Dados: {json.dumps(data, indent=2)}")
     
@@ -1401,7 +1431,8 @@ def webhook():
                                     try:
                                         await user.send(f"✅ **Pagamento confirmado!**\n\n📦 **{produto_info['nome']}**\n\n🔐 **Seu produto:**\n```{item}```\n\n✅ Obrigado pela preferência!")
                                         await log_pagamento_confirmado(user, produto_info['nome'], data.get('amount', 0)/100, payment_id, item)
-                                    except: pass
+                                    except Exception as e:
+                                        print(f"❌ Erro ao enviar entrega ou logar pagamento: {e}")
                                 asyncio.run_coroutine_threadsafe(enviar_entrega(), bot.loop)
                             else:
                                 asyncio.run_coroutine_threadsafe(user.send("✅ Pagamento confirmado, mas o estoque acabou! Um admin vai te entregar em breve."), bot.loop)
@@ -1418,7 +1449,8 @@ def webhook():
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # Adicionado use_reloader=False para evitar que o Flask inicie duas vezes
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 if __name__ == "__main__":
     # Inicia Flask em uma thread separada
@@ -1426,4 +1458,14 @@ if __name__ == "__main__":
     flask_thread.start()
     
     # Inicia o bot Discord
-    bot.run(DISCORD_TOKEN)
+    # Adicionado um loop para tentar reconectar em caso de falha
+    while True:
+        try:
+            bot.run(DISCORD_TOKEN)
+        except discord.errors.LoginFailure:
+            print("❌ Falha de login do Discord. Verifique o token.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ Erro inesperado no bot Discord: {e}")
+            print("Tentando reconectar em 15 segundos...")
+            time.sleep(15)
