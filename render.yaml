@@ -3,11 +3,9 @@ services:
     name: g7-store-bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: python bot.py
     envVars:
       - key: DISCORD_TOKEN
         sync: false
-      - key: MP_ACCESS_TOKEN
+      - key: WEBHOOK_URL
         sync: false
-      - key: PORT
-        value: 10000
