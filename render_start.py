@@ -31,8 +31,10 @@ except ImportError:
 
 # Verificar se o token existe
 if not DISCORD_TOKEN:
-    print("❌ ERRO: DISCORD_TOKEN não encontrado!")
-    sys.exit(1)
+    print("❌ ERRO CRÍTICO: DISCORD_TOKEN não encontrado nas variáveis de ambiente!")
+    print("Por favor, adicione DISCORD_TOKEN no painel do Render.")
+    # Não vamos dar sys.exit para não entrar em loop infinito de crash no Render
+    # Mas o bot não vai rodar sem o token.
 
 WEBHOOK_URL = os.environ.get(
     "WEBHOOK_URL",
@@ -44,14 +46,11 @@ ARQUIVO_PRODUTOS_JSON = "produtos.json"
 ARQUIVO_ESTOQUE_JSON = "estoque.json"
 ARQUIVO_PAGAMENTOS_PROCESSADOS = "pagamentos.json"
 
-# IDs do Discord (Configurados conforme seu código original)
+# IDs do Discord
 GUILD_ID = 1472114509068898367
-CARGO_MEMBRO = 1472666559049633952
-CARGO_CLIENTE = 1472666841515032676
 CANAL_CARRINHOS = 1513770446158303304
 CANAL_PAGOS = 1513770547933089852
 MEU_ID = 1431125477069688953
-CARGO_ADMIN = 1472666559049633952
 
 carrinhos_ativos = {}
 
@@ -78,7 +77,6 @@ def salvar_json(caminho, dados):
     except Exception as e:
         print(f"❌ Erro ao salvar {caminho}: {e}")
 
-# Funções específicas para compatibilidade com o código original
 def salvar_estoque(estoque): salvar_json(ARQUIVO_ESTOQUE_JSON, estoque)
 def salvar_produtos(produtos): salvar_json(ARQUIVO_PRODUTOS_JSON, produtos)
 def salvar_pagamentos_processados(pagamentos): salvar_json(ARQUIVO_PAGAMENTOS_PROCESSADOS, list(pagamentos))
@@ -92,16 +90,24 @@ produtos_disponiveis = carregar_json(ARQUIVO_PRODUTOS_JSON)
 # ===============================
 def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
     try:
-        preco_centavos = int(float(preco) * 100)
+        valor_float = float(preco)
+        if valor_float < 1.0:
+            return {"erro": "A InfinitePay exige valor mínimo de R$ 1,00."}
+            
+        preco_centavos = int(round(valor_float * 100))
         payload = {
             "handle": INFINITE_TAG,
             "order_nsu": f"{produto_id}_{user_id}_{int(time.time())}",
             "items": [{"quantity": 1, "price": preco_centavos, "description": f"Compra: {nome_produto}"[:60]}]
         }
-        if WEBHOOK_URL.startswith("https"):
+        if WEBHOOK_URL and WEBHOOK_URL.startswith("https"):
             payload["webhook_url"] = WEBHOOK_URL
 
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
         response = requests.post("https://api.checkout.infinitepay.io/links", json=payload, headers=headers, timeout=15)
         
         if response.status_code in [200, 201]:
@@ -144,7 +150,9 @@ def verificar_estoque(produto_id, variacao_nome=None):
 async def log_carrinho_ativo(user, produto_nome, valor, pagamento_id):
     try:
         canal = bot.get_channel(CANAL_CARRINHOS)
-        if not canal: return None
+        if not canal: 
+            print(f"⚠️ Canal de carrinhos ({CANAL_CARRINHOS}) não encontrado.")
+            return None
         embed = discord.Embed(title="🛒 NOVO CARRINHO ATIVO", color=0xffaa00, timestamp=datetime.now())
         embed.add_field(name="Cliente", value=user.mention, inline=True)
         embed.add_field(name="Produto", value=produto_nome, inline=True)
@@ -168,6 +176,8 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
             if item_entregue:
                 embed.add_field(name="🔐 Item Entregue", value=f"```{item_entregue}```", inline=False)
             await canal_pagos.send(embed=embed)
+        else:
+            print(f"⚠️ Canal de pagos ({CANAL_PAGOS}) não encontrado.")
             
         if str(pagamento_id) in carrinhos_ativos:
             dados = carrinhos_ativos[str(pagamento_id)]
@@ -215,7 +225,7 @@ class VariacoesView(discord.ui.View):
             await interaction.followup.send(f"❌ Erro: {pix_data['erro']}", ephemeral=True)
             return
         await log_carrinho_ativo(interaction.user, pix_data['produto'], pix_data['preco'], pix_data['payment_id'])
-        embed = discord.Embed(title="🧾 PAGAMENTO", description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}", color=0x00ff88)
+        embed = discord.Embed(title="🧾 PAGAMENTO - G7 STORE", description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}\n\nClique no botão abaixo para pagar.", color=0x00ff88)
         view = discord.ui.View(); view.add_item(discord.ui.Button(label="🔗 Pagar Agora", url=pix_data['payment_url']))
         await interaction.user.send(embed=embed, view=view)
         await interaction.followup.send("📨 Link enviado no privado!", ephemeral=True)
@@ -246,7 +256,7 @@ class ProdutoCompraView(discord.ui.View):
             await interaction.followup.send(f"❌ Erro: {pix_data['erro']}", ephemeral=True)
             return
         await log_carrinho_ativo(interaction.user, pix_data['produto'], pix_data['preco'], pix_data['payment_id'])
-        embed = discord.Embed(title="🧾 PAGAMENTO", description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}", color=0x00ff88)
+        embed = discord.Embed(title="🧾 PAGAMENTO - G7 STORE", description=f"**Produto:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}\n\nClique no botão abaixo para pagar.", color=0x00ff88)
         view = discord.ui.View(); view.add_item(discord.ui.Button(label="🔗 Pagar Agora", url=pix_data['payment_url']))
         await interaction.user.send(embed=embed, view=view)
         await interaction.followup.send("📨 Link enviado no privado!", ephemeral=True)
@@ -303,7 +313,7 @@ async def configurar_produto(interaction: discord.Interaction, canal: discord.Te
     await interaction.response.send_message("✅ Configurado!", ephemeral=True)
 
 # ===============================
-# KEEP ALIVE & MONITORAMENTO
+# KEEP ALIVE
 # ===============================
 def keep_alive_ping():
     url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}/"
@@ -312,7 +322,6 @@ def keep_alive_ping():
             time.sleep(600)
             if "localhost" not in url:
                 requests.get(url, timeout=10)
-                print(f"📡 Keep-alive ping enviado para {url}")
         except: pass
 
 # ===============================
@@ -339,7 +348,7 @@ def webhook():
                 partes = ref.split('_')
                 if len(partes) >= 3:
                     p_id, u_id = partes[0], int(partes[-2])
-                    v_nome = "_".join(partes[1:-2]) if len(partes) >= 4 else None
+                    v_nome = partes[1] if len(partes) == 4 else None
                     user = bot.get_user(u_id)
                     if not user:
                         try:
@@ -351,6 +360,8 @@ def webhook():
                         item = entregar_do_estoque(p_id, v_nome) if p_info.get("tipo") == "auto" else None
                         msg = f"✅ **Sua compra chegou!**\n\n📦 **{p_info['nome']}**\n\n🔐 **Produto:**\n```{item}```" if item else f"✅ Pagamento confirmado para **{p_info['nome']}**! Entrega manual em breve."
                         asyncio.run_coroutine_threadsafe(user.send(msg), bot.loop)
+                        # Log no canal de pagos
+                        asyncio.run_coroutine_threadsafe(log_pagamento_confirmado(user, p_info['nome'], data.get('amount', 0)/100, payment_id, item), bot.loop)
         except Exception as e: print(f"❌ Erro Webhook: {e}")
     return "OK", 200
 
@@ -359,12 +370,17 @@ def run_flask():
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    threading.Thread(target=keep_alive_ping, daemon=True).start()
-    print("🚀 Iniciando Bot...")
-    while True:
-        try:
-            bot.run(DISCORD_TOKEN)
-        except Exception as e:
-            print(f"🧨 Erro: {e}. Reiniciando...")
-            time.sleep(15)
+    if DISCORD_TOKEN:
+        threading.Thread(target=run_flask, daemon=True).start()
+        threading.Thread(target=keep_alive_ping, daemon=True).start()
+        print("🚀 Iniciando Bot...")
+        while True:
+            try:
+                bot.run(DISCORD_TOKEN)
+            except Exception as e:
+                print(f"🧨 Erro de conexão: {e}. Reiniciando em 15s...")
+                time.sleep(15)
+    else:
+        print("❌ Bot não pode ser iniciado sem DISCORD_TOKEN.")
+        # Mantém o Flask vivo para o Render não dar erro de porta
+        run_flask()
