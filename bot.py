@@ -306,6 +306,15 @@ async def remover_variacao_por_indice(interaction: discord.Interaction, produto_
     await salvar_tudo()
     await interaction.response.send_message(f"✅ Variação `{removida['nome']}` removida do produto `{produto_id}`!", ephemeral=True)
 
+@bot.tree.command(name="alterar_valor_produto", description="[ADMIN] Alterar o valor de um produto principal")
+async def alterar_valor_produto(interaction: discord.Interaction, produto_id: str, novo_preco: float):
+    if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
+    if produto_id not in produtos_disponiveis: return await interaction.response.send_message("❌ Produto não encontrado", ephemeral=True)
+
+    produtos_disponiveis[produto_id]["preco"] = novo_preco
+    await salvar_tudo()
+    await interaction.response.send_message(f"✅ Valor do produto `{produtos_disponiveis[produto_id]['nome']}` atualizado para R$ {novo_preco:.2f}!", ephemeral=True)
+
 @bot.tree.command(name="alterar_variacao_valor_por_indice", description="[ADMIN] Alterar o valor de uma variação de produto por índice")
 async def alterar_variacao_valor_por_indice(interaction: discord.Interaction, produto_id: str, indice: int, novo_preco: float):
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
@@ -317,7 +326,7 @@ async def alterar_variacao_valor_por_indice(interaction: discord.Interaction, pr
 
     variacoes[indice]["preco"] = novo_preco
     await salvar_tudo()
-    await interaction.response.send_message(f"✅ Valor da variação `{variacoes[indice]["nome"]}` do produto `{produto_id}` atualizado para R$ {novo_preco:.2f}!", ephemeral=True)
+    await interaction.response.send_message(f"✅ Valor da variação `{variacoes[indice]['nome']}` do produto `{produto_id}` atualizado para R$ {novo_preco:.2f}!", ephemeral=True)
 
 @bot.tree.command(name="add_variacao", description="[ADMIN] Adicionar variação")
 async def add_variacao(interaction: discord.Interaction, produto_id: str, nome: str, preco: float):
@@ -333,7 +342,7 @@ async def listar_produtos(interaction: discord.Interaction):
 
     msg = "**Produtos Cadastrados:**\n"
     for p_id, p_info in produtos_disponiveis.items():
-        msg += f"- ID: `{p_id}`, Nome: `{p_info["nome"]}`\n"
+        msg += f"- ID: `{p_id}`, Nome: `{p_info['nome']}`\n"
     await interaction.response.send_message(msg, ephemeral=True)
 
 @bot.tree.command(name="ver_estoque", description="[ADMIN] Ver o estoque de um produto ou variação")
