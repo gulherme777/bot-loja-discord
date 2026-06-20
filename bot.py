@@ -96,10 +96,10 @@ async def criar_pagamento_infinite(user_id, produto_id, preco, nome_produto):
         headers = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.checkout.infinitepay.io/links", json=payload, headers=headers, timeout=15) as response:
-                if response.status_code in [200, 201]:
-                    data = await response.json()
-                    return {"payment_url": data.get("url"), "produto": nome_produto, "preco": valor_float, "payment_id": data.get("invoice_slug"), "produto_id": produto_id}
-                return {"erro": f"InfinitePay {response.status_code}"}
+        if response.status_code in [200, 201]:
+            data = await response.json()
+            return {"payment_url": data.get("url"), "produto": nome_produto, "preco": valor_float, "payment_id": data.get("invoice_slug"), "produto_id": produto_id}
+        return {"erro": f"InfinitePay {response.status_code}"}
     except Exception as e: return {"erro": str(e)}
 
 # ===============================
@@ -112,13 +112,13 @@ def entregar_do_estoque(produto_id, variacao_nome=None):
             itens = estoque_disponivel[produto_id].get("variacoes", {}).get(variacao_nome, [])
             if itens:
                 item = itens.pop(0)
-                asyncio.run_coroutine_threadsafe(salvar_tudo(), bot.loop) # Salvar após remover item
+                await salvar_tudo()
                 return item
             return None
         itens = estoque_disponivel[produto_id].get("itens", [])
         if itens:
             item = itens.pop(0)
-            asyncio.run_coroutine_threadsafe(salvar_tudo(), bot.loop) # Salvar após remover item
+            await salvar_tudo()
             return item
         return None
 
@@ -215,15 +215,9 @@ async def log_sucesso(user, prod, valor, pay_id, item=None):
 # BOT CORE
 # ===============================
 class Bot(discord.Client):
-    def __init__(self):
-        super().__init__(intents=discord.Intents.all())
-        self.tree = app_commands.CommandTree(self)
-
-    async def setup_hook(self):
-        await self.tree.sync()
-
-    async def on_ready(self):
-        print(f"🟢 Logado como {self.user}")
+    def __init__(self): super().__init__(intents=discord.Intents.all()); self.tree = app_commands.CommandTree(self)
+    async def setup_hook(self): await self.tree.sync()
+    async def on_ready(self): print(f"🟢 Logado como {self.user}")
 
 bot = Bot()
 
@@ -410,6 +404,8 @@ def webhook():
                     p_info = produtos_disponiveis[p_id]
                     if p_info.get("tipo") == "auto":
                         it = entregar_do_estoque(p_id, v_n)
+                        # Certifique-se de que salvar_tudo() é chamado após entregar_do_estoque, se necessário
+                        # asyncio.run_coroutine_threadsafe(salvar_tudo(), bot.loop)
                         async def deliver():
                             u = await bot.fetch_user(u_id)
                             try:
@@ -423,4 +419,4 @@ def webhook():
 if __name__ == "__main__":
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000), daemon=True).start()
     if DISCORD_TOKEN: bot.run(DISCORD_TOKEN)
-    else: print("⚠️ Sem Token"))
+    else: print("⚠️ Sem Token")
