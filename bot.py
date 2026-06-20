@@ -152,6 +152,37 @@ async def criar_embed_produto(produto_id, p_info):
 # ===============================
 # VIEWS
 # ===============================
+class Modal2FA(discord.ui.Modal, title="Gerador de Código 2FA"):
+    secret_input = discord.ui.TextInput(
+        label="Chave Secreta (2FA Key)",
+        placeholder="Cole aqui a sua chave secreta...",
+        required=True,
+        min_length=16
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            secret = self.secret_input.value.replace(" ", "").upper()
+            totp = pyotp.TOTP(secret)
+            code = totp.now()
+            # Calcula o tempo restante
+            time_remaining = 30 - (int(time.time()) % 30)
+            
+            embed = discord.Embed(title="🔐 Código 2FA Gerado", color=0x00ff88)
+            embed.add_field(name="Código", value=f"```\n{code}\n```", inline=False)
+            embed.set_footer(text=f"Expira em {time_remaining} segundos")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erro ao gerar código: Verifique se a chave está correta.", ephemeral=True)
+
+class View2FA(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔑 Gerar Código 2FA", style=discord.ButtonStyle.primary, custom_id="btn_2fa_modal")
+    async def gerar_2fa_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(Modal2FA())
 class VariacoesView(discord.ui.View):
     def __init__(self, produto_id, produto_nome, variacoes):
         super().__init__(timeout=300)
@@ -221,7 +252,9 @@ async def log_sucesso(user, prod, valor, pay_id, item=None):
 # ===============================
 class Bot(discord.Client):
     def __init__(self): super().__init__(intents=discord.Intents.all()); self.tree = app_commands.CommandTree(self)
-    async def setup_hook(self): await self.tree.sync()
+    async def setup_hook(self):
+        self.add_view(View2FA())
+        await self.tree.sync()
     async def on_ready(self): print(f"🟢 Logado como {self.user}")
 
 bot = Bot()
@@ -229,14 +262,19 @@ bot = Bot()
 # ===============================
 # COMANDOS ADMIN
 # ===============================
-@bot.tree.command(name="gerar_2fa", description="Gerar código 2FA a partir de uma chave secreta")
-async def gerar_2fa(interaction: discord.Interaction, secret: str):
-    try:
-        totp = pyotp.TOTP(secret)
-        code = totp.now()
-        await interaction.response.send_message(f"Seu código 2FA é: `{code}`", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Erro ao gerar 2FA: {e}. Verifique se a chave secreta está correta.", ephemeral=True)
+@bot.tree.command(name="setup_2fa", description="[ADMIN] Enviar o painel de 2FA interativo para o canal")
+async def setup_2fa(interaction: discord.Interaction):
+    if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
+    
+    embed = discord.Embed(
+        title="🔐 GERADOR DE 2FA",
+        description="Clique no botão abaixo para gerar o seu código de autenticação de dois fatores.\n\n**Como usar:**\n1. Clique em 'Gerar Código 2FA'\n2. Cole sua chave secreta\n3. Receba seu código instantaneamente!",
+        color=0x5865F2
+    )
+    embed.set_footer(text="G7 STORE - Segurança em primeiro lugar")
+    
+    await interaction.channel.send(embed=embed, view=View2FA())
+    await interaction.response.send_message("✅ Painel 2FA enviado!", ephemeral=True)
 
 @bot.tree.command(name="criar_produto", description="[ADMIN] Criar um novo produto")
 async def criar_produto(interaction: discord.Interaction, id: str, nome: str, preco: float, descricao: str, tipo: str = "auto"):
@@ -496,4 +534,3 @@ if __name__ == "__main__":
             print(f"❌ Erro ao iniciar bot: {e}")
     else:
         print("⚠️ Sem Token DISCORD_TOKEN")
-    
