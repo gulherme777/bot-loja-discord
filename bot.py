@@ -293,7 +293,7 @@ async def listar_variacoes(interaction: discord.Interaction, produto_id: str):
         msg += f"`{i}`: {v['nome']} (R$ {v['preco']:.2f})\n"
     await interaction.response.send_message(msg, ephemeral=True)
 
-@bot.tree.command(name="remover_variacao_por_indice", description="[ADMIN] Remover uma variação de produto por índice")
+@bot.tree.command(name="rem_variacao_idx", description="[ADMIN] Remover uma variação de produto por índice")
 async def remover_variacao_por_indice(interaction: discord.Interaction, produto_id: str, indice: int):
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     if produto_id not in produtos_disponiveis: return await interaction.response.send_message("❌ Produto não encontrado", ephemeral=True)
@@ -315,7 +315,7 @@ async def alterar_valor_produto(interaction: discord.Interaction, produto_id: st
     await salvar_tudo()
     await interaction.response.send_message(f"✅ Valor do produto `{produtos_disponiveis[produto_id]['nome']}` atualizado para R$ {novo_preco:.2f}!", ephemeral=True)
 
-@bot.tree.command(name="alterar_variacao_valor_por_indice", description="[ADMIN] Alterar o valor de uma variação de produto por índice")
+@bot.tree.command(name="alt_variacao_valor", description="[ADMIN] Alterar o valor de uma variação de produto por índice")
 async def alterar_variacao_valor_por_indice(interaction: discord.Interaction, produto_id: str, indice: int, novo_preco: float):
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     if produto_id not in produtos_disponiveis: return await interaction.response.send_message("❌ Produto não encontrado", ephemeral=True)
@@ -356,7 +356,7 @@ async def ver_estoque(interaction: discord.Interaction, produto_id: str, variaca
     else:
         await interaction.response.send_message(f"📦 Estoque total para `{produto_id}`: {qtd} itens", ephemeral=True)
 
-@bot.tree.command(name="listar_estoque_itens", description="[ADMIN] Listar itens do estoque de um produto com seus índices")
+@bot.tree.command(name="list_estoque", description="[ADMIN] Listar itens do estoque de um produto com seus índices")
 async def listar_estoque_itens(interaction: discord.Interaction, produto_id: str, variacao: str = None):
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     if produto_id not in estoque_disponivel: return await interaction.response.send_message("❌ Produto não encontrado no estoque", ephemeral=True)
@@ -378,7 +378,7 @@ async def listar_estoque_itens(interaction: discord.Interaction, produto_id: str
             msg += f"`{i}`: {item}\n"
         await interaction.response.send_message(msg, ephemeral=True)
 
-@bot.tree.command(name="remover_estoque_por_indice", description="[ADMIN] Remover um item do estoque por índice")
+@bot.tree.command(name="rem_estoque_idx", description="[ADMIN] Remover um item do estoque por índice")
 async def remover_estoque_por_indice(interaction: discord.Interaction, produto_id: str, indice: int, variacao: str = None):
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     if produto_id not in estoque_disponivel: return await interaction.response.send_message("❌ Produto não encontrado no estoque", ephemeral=True)
@@ -496,3 +496,4 @@ if __name__ == "__main__":
             print(f"❌ Erro ao iniciar bot: {e}")
     else:
         print("⚠️ Sem Token DISCORD_TOKEN")
+    
