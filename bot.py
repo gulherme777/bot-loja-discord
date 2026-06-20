@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-import requests
+import aiohttp
 from flask import Flask, request
 import threading
 import asyncio
@@ -62,7 +62,7 @@ def carregar_json(caminho):
         with open(caminho, 'r', encoding='utf-8') as f: return json.load(f)
     except: return {}
 
-def salvar_json(caminho, dados):
+async def salvar_json(caminho, dados):
     try:
         with open(caminho, 'w', encoding='utf-8') as f: json.dump(dados, f, indent=2, ensure_ascii=False)
     except Exception as e: print(f"❌ Erro ao salvar {caminho}: {e}")
@@ -72,16 +72,16 @@ estoque_disponivel = carregar_json(ARQUIVO_ESTOQUE_JSON)
 pagamentos_processados = set(carregar_json(ARQUIVO_PAGAMENTOS_PROCESSADOS))
 cupons_disponiveis = carregar_json(ARQUIVO_CUPONS_JSON)
 
-def salvar_tudo():
-    salvar_json(ARQUIVO_PRODUTOS_JSON, produtos_disponiveis)
-    salvar_json(ARQUIVO_ESTOQUE_JSON, estoque_disponivel)
-    salvar_json(ARQUIVO_PAGAMENTOS_PROCESSADOS, list(pagamentos_processados))
-    salvar_json(ARQUIVO_CUPONS_JSON, cupons_disponiveis)
+async def salvar_tudo():
+    await salvar_json(ARQUIVO_PRODUTOS_JSON, produtos_disponiveis)
+    await salvar_json(ARQUIVO_ESTOQUE_JSON, estoque_disponivel)
+    await salvar_json(ARQUIVO_PAGAMENTOS_PROCESSADOS, list(pagamentos_processados))
+    await salvar_json(ARQUIVO_CUPONS_JSON, cupons_disponiveis)
 
 # ===============================
 # GATEWAY INFINITE PAY
 # ===============================
-def criar_pagamento_infinite(user_id, produto_id, preco, nome_produto):
+async def criar_pagamento_infinite(user_id, produto_id, preco, nome_produto):
     try:
         valor_float = float(preco)
         if valor_float < 1.0: return {"erro": "Valor mínimo R$ 1,00."}
@@ -94,11 +94,12 @@ def criar_pagamento_infinite(user_id, produto_id, preco, nome_produto):
         }
         if WEBHOOK_URL and WEBHOOK_URL.startswith("https"): payload["webhook_url"] = WEBHOOK_URL
         headers = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "Mozilla/5.0"}
-        response = requests.post("https://api.checkout.infinitepay.io/links", json=payload, headers=headers, timeout=15)
-        if response.status_code in [200, 201]:
-            data = response.json()
-            return {"payment_url": data.get("url"), "produto": nome_produto, "preco": valor_float, "payment_id": data.get("invoice_slug"), "produto_id": produto_id}
-        return {"erro": f"InfinitePay {response.status_code}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://api.checkout.infinitepay.io/links", json=payload, headers=headers, timeout=15) as response:
+                if response.status_code in [200, 201]:
+                    data = await response.json()
+                    return {"payment_url": data.get("url"), "produto": nome_produto, "preco": valor_float, "payment_id": data.get("invoice_slug"), "produto_id": produto_id}
+                return {"erro": f"InfinitePay {response.status_code}"}
     except Exception as e: return {"erro": str(e)}
 
 # ===============================
@@ -111,13 +112,13 @@ def entregar_do_estoque(produto_id, variacao_nome=None):
             itens = estoque_disponivel[produto_id].get("variacoes", {}).get(variacao_nome, [])
             if itens:
                 item = itens.pop(0)
-                salvar_tudo()
+                asyncio.run_coroutine_threadsafe(salvar_tudo(), bot.loop) # Salvar após remover item
                 return item
             return None
         itens = estoque_disponivel[produto_id].get("itens", [])
         if itens:
             item = itens.pop(0)
-            salvar_tudo()
+            asyncio.run_coroutine_threadsafe(salvar_tudo(), bot.loop) # Salvar após remover item
             return item
         return None
 
@@ -157,7 +158,7 @@ class VariacoesView(discord.ui.View):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         v = self.variacoes[int(interaction.data["values"][0])]
-        res = criar_pagamento_infinite(interaction.user.id, f"{self.produto_id}_{v['nome']}", v["preco"], f"{self.produto_nome} - {v['nome']}")
+        res = await criar_pagamento_infinite(interaction.user.id, f"{self.produto_id}_{v['nome']}", v["preco"], f"{self.produto_nome} - {v['nome']}")
         if "erro" in res: await interaction.followup.send(f"❌ Erro: {res['erro']}", ephemeral=True)
         else:
             view = discord.ui.View(); view.add_item(discord.ui.Button(label="🔗 Pagar Agora", url=res['payment_url']))
@@ -175,7 +176,7 @@ class ProdutoCompraView(discord.ui.View):
         if self.p_info.get("variacoes"):
             await interaction.followup.send("Escolha a opção:", view=VariacoesView(self.produto_id, self.p_info["nome"], self.p_info["variacoes"]), ephemeral=True)
         else:
-            res = criar_pagamento_infinite(interaction.user.id, self.produto_id, self.p_info["preco"], self.p_info["nome"])
+            res = await criar_pagamento_infinite(interaction.user.id, self.produto_id, self.p_info["preco"], self.p_info["nome"])
             if "erro" in res: await interaction.followup.send(f"❌ Erro: {res['erro']}", ephemeral=True)
             else:
                 view = discord.ui.View(); view.add_item(discord.ui.Button(label="🔗 Pagar Agora", url=res['payment_url']))
@@ -214,9 +215,15 @@ async def log_sucesso(user, prod, valor, pay_id, item=None):
 # BOT CORE
 # ===============================
 class Bot(discord.Client):
-    def __init__(self): super().__init__(intents=discord.Intents.all()); self.tree = app_commands.CommandTree(self)
-    async def setup_hook(self): await self.tree.sync()
-    async def on_ready(self): print(f"🟢 Logado como {self.user}")
+    def __init__(self):
+        super().__init__(intents=discord.Intents.all())
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+
+    async def on_ready(self):
+        print(f"🟢 Logado como {self.user}")
 
 bot = Bot()
 
@@ -230,7 +237,7 @@ async def criar_produto(interaction: discord.Interaction, id: str, nome: str, pr
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     produtos_disponiveis[id] = {"nome": nome, "preco": preco, "descricao": descricao, "tipo": tipo, "imagem": "", "variacoes": []}
     with estoque_lock: estoque_disponivel[id] = {"itens": [], "variacoes": {}}
-    salvar_tudo(); await interaction.response.send_message(f"✅ Produto `{id}` criado!", ephemeral=True)
+    await salvar_tudo(); await interaction.response.send_message(f"✅ Produto `{id}` criado!", ephemeral=True)
 
 # 2. /editar_produto (NOME, DESC, TIPO, IMAGEM, PREÇO)
 @bot.tree.command(name="editar_produto", description="[ADMIN] Editar campos de um produto")
@@ -247,7 +254,7 @@ async def editar_produto(interaction: discord.Interaction, produto_id: str, camp
     if produto_id not in produtos_disponiveis: return await interaction.response.send_message("❌ Não encontrado", ephemeral=True)
     if campo == "preco": produtos_disponiveis[produto_id][campo] = float(valor)
     else: produtos_disponiveis[produto_id][campo] = valor
-    salvar_tudo(); await interaction.response.send_message(f"✅ {campo} de `{produto_id}` atualizado!", ephemeral=True)
+    await salvar_tudo(); await interaction.response.send_message(f"✅ {campo} de `{produto_id}` atualizado!", ephemeral=True)
 
 # 3. /set_imagem (RETORNO DO COMANDO DIRETO)
 @bot.tree.command(name="set_imagem", description="[ADMIN] Definir imagem de um produto rapidamente")
@@ -255,7 +262,7 @@ async def set_imagem(interaction: discord.Interaction, produto_id: str, url_imag
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     if produto_id not in produtos_disponiveis: return await interaction.response.send_message("❌ Não encontrado", ephemeral=True)
     produtos_disponiveis[produto_id]["imagem"] = url_imagem
-    salvar_tudo(); await interaction.response.send_message(f"✅ Imagem de `{produto_id}` atualizada!", ephemeral=True)
+    await salvar_tudo(); await interaction.response.send_message(f"✅ Imagem de `{produto_id}` atualizada!", ephemeral=True)
 
 # 4. /add_variacao
 @bot.tree.command(name="add_variacao", description="[ADMIN] Adicionar variação")
@@ -263,7 +270,7 @@ async def add_variacao(interaction: discord.Interaction, produto_id: str, nome: 
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     if produto_id not in produtos_disponiveis: return await interaction.response.send_message("❌ Não encontrado", ephemeral=True)
     produtos_disponiveis[produto_id].setdefault("variacoes", []).append({"nome": nome, "preco": preco})
-    salvar_tudo(); await interaction.response.send_message(f"✅ Variação `{nome}` adicionada!", ephemeral=True)
+    await salvar_tudo(); await interaction.response.send_message(f"✅ Variação `{nome}` adicionada!", ephemeral=True)
 
 # 5. /editar_variacao
 @bot.tree.command(name="editar_variacao", description="[ADMIN] Editar uma variação")
@@ -273,7 +280,7 @@ async def editar_variacao(interaction: discord.Interaction, produto_id: str, ind
     if 0 <= indice < len(variacoes):
         if novo_nome: variacoes[indice]["nome"] = novo_nome
         if novo_preco: variacoes[indice]["preco"] = novo_preco
-        salvar_tudo(); await interaction.response.send_message("✅ Variação editada!", ephemeral=True)
+        await salvar_tudo(); await interaction.response.send_message("✅ Variação editada!", ephemeral=True)
     else: await interaction.response.send_message("❌ Índice inválido", ephemeral=True)
 
 # 6. /remover_variacao
@@ -283,7 +290,7 @@ async def remover_variacao(interaction: discord.Interaction, produto_id: str, in
     variacoes = produtos_disponiveis.get(produto_id, {}).get("variacoes", [])
     if 0 <= indice < len(variacoes):
         removida = variacoes.pop(indice)
-        salvar_tudo(); await interaction.response.send_message(f"✅ Variação `{removida['nome']}` removida!", ephemeral=True)
+        await salvar_tudo(); await interaction.response.send_message(f"✅ Variação `{removida['nome']}` removida!", ephemeral=True)
     else: await interaction.response.send_message("❌ Índice inválido", ephemeral=True)
 
 # 7. /add_estoque
@@ -295,7 +302,7 @@ async def add_estoque(interaction: discord.Interaction, produto_id: str, itens: 
         est = estoque_disponivel.setdefault(produto_id, {"itens": [], "variacoes": {}})
         if variacao: est.setdefault("variacoes", {}).setdefault(variacao, []).extend(novos)
         else: est.setdefault("itens", []).extend(novos)
-    salvar_tudo(); await interaction.response.send_message(f"✅ {len(novos)} itens adicionados!", ephemeral=True)
+    await salvar_tudo(); await interaction.response.send_message(f"✅ {len(novos)} itens adicionados!", ephemeral=True)
 
 # 8. /ver_estoque (MOSTRA ÍNDICES)
 @bot.tree.command(name="ver_estoque", description="[ADMIN] Ver itens e seus índices")
@@ -316,7 +323,7 @@ async def remover_esto_indice(interaction: discord.Interaction, produto_id: str,
         lista = est.get("variacoes", {}).get(variacao, []) if variacao else est.get("itens", [])
         if 0 <= indice < len(lista):
             removido = lista.pop(indice)
-            salvar_tudo(); await interaction.response.send_message(f"✅ Item `{removido}` removido!", ephemeral=True)
+            await salvar_tudo(); await interaction.response.send_message(f"✅ Item `{removido}` removido!", ephemeral=True)
         else: await interaction.response.send_message("❌ Índice inválido", ephemeral=True)
 
 # 10. /listar_produtos
@@ -355,7 +362,7 @@ async def broadcast(interaction: discord.Interaction, mensagem: str):
 async def criar_cupom(interaction: discord.Interaction, codigo: str, desconto_fixo: float):
     if interaction.user.id != MEU_ID: return await interaction.response.send_message("❌ Sem permissão", ephemeral=True)
     cupons_disponiveis[codigo.upper()] = desconto_fixo
-    salvar_tudo(); await interaction.response.send_message(f"✅ Cupom `{codigo.upper()}` de R$ {desconto_fixo:.2f} criado!", ephemeral=True)
+    await salvar_tudo(); await interaction.response.send_message(f"✅ Cupom `{codigo.upper()}` de R$ {desconto_fixo:.2f} criado!", ephemeral=True)
 
 # 14. /configurar_2fa
 @bot.tree.command(name="configurar_2fa", description="[ADMIN] Canal de 2FA")
@@ -391,7 +398,7 @@ def webhook():
         with webhook_lock:
             slug = d.get("invoice_slug")
             if slug in pagamentos_processados: return "OK", 200
-            pagamentos_processados.add(slug); salvar_tudo()
+            pagamentos_processados.add(slug); asyncio.run_coroutine_threadsafe(salvar_tudo(), bot.loop)
             pts = d["order_nsu"].split('_')
             if len(pts) >= 3:
                 u_id = int(pts[-2]); p_ref = pts[0]; p_id = None; v_n = None
@@ -416,4 +423,4 @@ def webhook():
 if __name__ == "__main__":
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000), daemon=True).start()
     if DISCORD_TOKEN: bot.run(DISCORD_TOKEN)
-    else: print("⚠️ Sem Token")
+    else: print("⚠️ Sem Token"))
