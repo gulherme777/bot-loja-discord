@@ -564,4 +564,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Erro ao iniciar bot: {e}")
     else:
-        print("⚠️ Sem Token DISCORD_TOKEN"))
+        print("⚠️ Sem Token DISCORD_TOKEN")
