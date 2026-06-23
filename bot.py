@@ -114,12 +114,17 @@ async def criar_pagamento_infinite(user_id, produto_id, preco, nome_produto):
 def entregar_do_estoque(produto_id, variacao_nome=None):
     with estoque_lock:
         if produto_id not in estoque_disponivel: return None
+        
+        # Lógica para variações
         if variacao_nome:
-            itens = estoque_disponivel[produto_id].get("variacoes", {}).get(variacao_nome, [])
-            if itens:
-                item = itens.pop(0)
-                return item
+            if "variacoes" in estoque_disponivel[produto_id] and variacao_nome in estoque_disponivel[produto_id]["variacoes"]:
+                itens = estoque_disponivel[produto_id]["variacoes"][variacao_nome]
+                if itens:
+                    item = itens.pop(0)
+                    return item
             return None
+        
+        # Lógica para produtos sem variações
         itens = estoque_disponivel[produto_id].get("itens", [])
         if itens:
             item = itens.pop(0)
@@ -232,19 +237,28 @@ async def log_carrinho(user, prod, valor, pay_id):
         carrinhos_ativos[str(pay_id)] = {"msg_id": msg.id, "user_id": user.id, "prod": prod}
 
 async def log_sucesso(user, prod, valor, pay_id, item=None):
-    canal = bot.get_channel(CANAL_PAGOS)
-    if canal:
+    canal_pagos = bot.get_channel(CANAL_PAGOS) # Canal correto para pagamentos
+    if canal_pagos:
         embed = discord.Embed(title="✅ PAGAMENTO CONFIRMADO", color=0x00ff88, timestamp=datetime.now())
         embed.add_field(name="Cliente", value=user.mention).add_field(name="Produto", value=prod).add_field(name="Valor", value=f"R$ {valor:.2f}")
         if item: embed.add_field(name="🔐 Item", value=f"```{item}```", inline=False)
-        await canal.send(embed=embed)
+        await canal_pagos.send(embed=embed)
+    
+    # Atualizar a mensagem no canal de carrinhos ativos
     if str(pay_id) in carrinhos_ativos:
         try:
             c_canal = bot.get_channel(CANAL_CARRINHOS)
-            msg = await c_canal.fetch_message(carrinhos_ativos[str(pay_id)]["msg_id"])
-            await msg.edit(embed=discord.Embed(title="✅ APROVADO", description=f"Cliente: {user.mention}\nProduto: {prod}", color=0x00ff88))
-        except: pass
-        del carrinhos_ativos[str(pay_id)]
+            if c_canal:
+                msg = await c_canal.fetch_message(carrinhos_ativos[str(pay_id)]["msg_id"])
+                # Alterar o título para indicar que o carrinho foi aprovado
+                updated_embed = discord.Embed(title="✅ CARRINHO APROVADO", description=f"Cliente: {user.mention}\nProduto: {prod}", color=0x00ff88)
+                await msg.edit(embed=updated_embed)
+        except discord.NotFound: # Mensagem pode ter sido apagada
+            print(f"⚠️ Mensagem de carrinho ativo {carrinhos_ativos[str(pay_id)]['msg_id']} não encontrada para edição.")
+        except Exception as e:
+            print(f"❌ Erro ao editar mensagem de carrinho ativo: {e}")
+        finally:
+            del carrinhos_ativos[str(pay_id)]
 
 # ===============================
 # BOT CORE
@@ -294,7 +308,7 @@ async def remover_produto(interaction: discord.Interaction, produto_id: str):
     await salvar_tudo()
     await interaction.response.send_message(f"✅ Produto `{produto_id}` removido!", ephemeral=True)
 
-@bot.tree.command(name="editar_produto", description="[ADMIN] Editar campos de um produto")
+@bot.tree.command(name="editar_produto", description="[ADMIN] Editar campo")
 @app_commands.describe(campo="O que deseja editar", valor="Novo valor")
 @app_commands.choices(campo=[
     app_commands.Choice(name="Nome", value="nome"),
@@ -520,7 +534,7 @@ def webhook():
                                 if it: 
                                     await u.send(f"✅ **Aprovado!**\n📦 **{p_info['nome']}**\n🔐 **Item:**\n```{it}```")
                                 else: 
-                                    await u.send(f"✅ **Aprovado!**\n📦 **{p_info['nome']}**\n⚠️ Estoque esgotado, admin entregará.")
+                                    await u.send(f"✅ **Aprovado!**\n📦 **{p_info['nome']}**\n⚠️ Estoque esgotado para {p_info['nome']} {'(Variação: ' + v_n + ')' if v_n else ''}. O administrador será notificado para entrega manual.")
                                 # Salvar o estado atualizado do estoque APÓS a entrega
                                 await salvar_tudo()
                                 await log_sucesso(u, p_info['nome'], float(d.get('amount', 0))/100, slug, it)
@@ -550,4 +564,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Erro ao iniciar bot: {e}")
     else:
-        print("⚠️ Sem Token DISCORD_TOKEN")
+        print("⚠️ Sem Token DISCORD_TOKEN"))
