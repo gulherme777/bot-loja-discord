@@ -16,30 +16,27 @@ import pyotp
 print("🔧 Iniciando bot G7 STORE...")
 
 # ===============================
-# CONFIG - 🔥 ALTERAR AQUI!
+# CONFIG - 🔥 TODAS AS VARIÁVEIS DE AMBIENTE
 # ===============================
-DISCORD_TOKEN = os.environ.get("MTUxMzc4NDI4NjkwMDM5MTk0Nw.GQUmlo.SQvH6dQwqvy6KvO4xvWmUn76bxoilMTlEWTozw", "")  # ← NOVO NOME DA VARIAVEL
-MP_ACCESS_TOKEN = os.environ.get("APP_USR-840641005253142-062321-08660b2e768df969d3a9abd70b696a73-3273668724", "")  # ← NOVO NOME DA VARIAVEL
-WEBHOOK_URL = os.environ.get(
-    "https://bot-loja-discord-jty5.onrender.com",  # ← NOVO NOME DA VARIAVEL
-    "https://bot-discord-loja-g7.onrender.com/webhook"  # ← NOVO URL
-)
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_G7", "")  # ← NUNCA COLOQUE O TOKEN AQUI!
+MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN_G7", "")  # ← NUNCA COLOQUE O TOKEN AQUI!
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL_G7", "https://bot-loja-discord-jty5.onrender.com/webhook")
 
-ARQUIVO_PRODUTO = "produto_g7.txt"  # ← NOVO NOME
-ARQUIVO_PRODUTOS_JSON = "produtos_g7.json"  # ← NOVO NOME
-ARQUIVO_ESTOQUE_JSON = "estoque_g7.json"  # ← NOVO NOME
-ARQUIVO_PAGAMENTOS_PROCESSADOS = "pagamentos_g7.json"  # ← NOVO NOME
+ARQUIVO_PRODUTO = "produto_g7.txt"
+ARQUIVO_PRODUTOS_JSON = "produtos_g7.json"
+ARQUIVO_ESTOQUE_JSON = "estoque_g7.json"
+ARQUIVO_PAGAMENTOS_PROCESSADOS = "pagamentos_g7.json"
 
 # ===============================
-# CONFIGURAÇÕES DO SERVIDOR - 🔥 ALTERAR AQUI!
+# CONFIGURAÇÕES DO SERVIDOR - 🔥 SEUS IDS
 # ===============================
-GUILD_ID = 1431125477069688953  # ← NOVO ID DO SERVIDOR G7
-CARGO_MEMBRO = 1431125477069688953  # ← NOVO ID DO CARGO
-CARGO_CLIENTE = 1431125477069688953  # ← NOVO ID DO CARGO
-CANAL_CARRINHOS = 1513770446158303304  # ← NOVO ID DO CANAL
-CANAL_PAGOS = 1513770547933089852  # ← NOVO ID DO CANAL
-MEU_ID = 1431125477069688953  # ← SEU ID (pode manter ou mudar)
-CARGO_ADMIN = 1431125477069688953  # ← NOVO ID DO CARGO ADMIN
+GUILD_ID = 1431125477069688953
+CARGO_MEMBRO = 1431125477069688953
+CARGO_CLIENTE = 1431125477069688953
+CANAL_CARRINHOS = 1513770446158303304
+CANAL_PAGOS = 1513770547933089852
+MEU_ID = 1431125477069688953
+CARGO_ADMIN = 1431125477069688953
 
 # ===============================
 # SISTEMA DE PAGAMENTOS PROCESSADOS
@@ -107,7 +104,7 @@ def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
         
         payment_data = {
             "transaction_amount": preco_formatado,
-            "description": f"Compra G7: {nome_produto}"[:60],  # ← ALTERADO
+            "description": f"Compra G7: {nome_produto}"[:60],
             "payment_method_id": "pix",
             "payer": {
                 "email": f"c_{user_id}@cliente.com",
@@ -210,7 +207,7 @@ async def log_carrinho_ativo(user, produto_nome, valor, pagamento_id):
             return None
         
         embed = discord.Embed(
-            title="🛒 NOVO CARRINHO ATIVO G7",  # ← ALTERADO
+            title="🛒 NOVO CARRINHO ATIVO G7",
             color=0xffaa00,
             timestamp=datetime.now()
         )
@@ -243,7 +240,7 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
             return
         
         embed = discord.Embed(
-            title="✅ PAGAMENTO CONFIRMADO G7",  # ← ALTERADO
+            title="✅ PAGAMENTO CONFIRMADO G7",
             color=0x00ff88,
             timestamp=datetime.now()
         )
@@ -256,7 +253,7 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
         
         if item_entregue:
             embed.add_field(
-                name="🔐 Item Entregue G7",  # ← ALTERADO
+                name="🔐 Item Entregue G7",
                 value=f"```{item_entregue}```",
                 inline=False
             )
@@ -272,14 +269,14 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
                 try:
                     msg = await canal_carrinho.fetch_message(dados["mensagem_id"])
                     embed_aprovado = discord.Embed(
-                        title="✅ PAGAMENTO APROVADO G7",  # ← ALTERADO
+                        title="✅ PAGAMENTO APROVADO G7",
                         description=f"Cliente: {user.mention}\nProduto G7: {produto_nome}\nValor: R$ {valor:.2f}",
                         color=0x00ff88,
                         timestamp=datetime.now()
                     )
                     if item_entregue:
                         embed_aprovado.add_field(
-                            name="🔐 Item Entregue G7",  # ← ALTERADO
+                            name="🔐 Item Entregue G7",
                             value=f"```{item_entregue}```",
                             inline=False
                         )
@@ -324,7 +321,7 @@ class CopiarPIXView(discord.ui.View):
         super().__init__(timeout=300)
         self.codigo_pix = codigo_pix
 
-    @discord.ui.button(label="📋 Copiar código PIX G7", style=discord.ButtonStyle.primary)  # ← ALTERADO
+    @discord.ui.button(label="📋 Copiar código PIX G7", style=discord.ButtonStyle.primary)
     async def copiar_pix(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             await interaction.response.send_message(
@@ -338,9 +335,9 @@ class CopiarPIXView(discord.ui.View):
 # ===============================
 # MODAL PARA 2FA
 # ===============================
-class Modal2FA(discord.ui.Modal, title="Gerar Código 2FA G7"):  # ← ALTERADO
+class Modal2FA(discord.ui.Modal, title="Gerar Código 2FA G7"):
     chave = discord.ui.TextInput(
-        label="Chave 2FA G7",  # ← ALTERADO
+        label="Chave 2FA G7",
         placeholder="Cole sua chave aqui (ex: 7J64V3P3E77J3LKN...)",
         min_length=16,
         required=True
@@ -356,8 +353,8 @@ class Modal2FA(discord.ui.Modal, title="Gerar Código 2FA G7"):  # ← ALTERADO
             tempo_restante = totp.interval - (int(time.time()) % totp.interval)
             
             embed = discord.Embed(
-                title="🔐 **CÓDIGO 2FA GERADO G7**",  # ← ALTERADO
-                description="Use o código abaixo para acessar sua conta G7:",  # ← ALTERADO
+                title="🔐 **CÓDIGO 2FA GERADO G7**",
+                description="Use o código abaixo para acessar sua conta G7:",
                 color=0x00ff88,
                 timestamp=datetime.now()
             )
@@ -370,7 +367,7 @@ class Modal2FA(discord.ui.Modal, title="Gerar Código 2FA G7"):  # ← ALTERADO
                 def __init__(self, codigo: str):
                     super().__init__(timeout=60)
                     self.codigo = codigo
-                @discord.ui.button(label="📋 Copiar Código G7", style=discord.ButtonStyle.success)  # ← ALTERADO
+                @discord.ui.button(label="📋 Copiar Código G7", style=discord.ButtonStyle.success)
                 async def copiar(self, i: discord.Interaction, b: discord.ui.Button):
                     try:
                         await i.response.send_message(f"{self.codigo}", ephemeral=True)
@@ -392,7 +389,7 @@ class Canal2FAView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔐 Gerar Código 2FA G7", style=discord.ButtonStyle.success, custom_id="btn_gerar_2fa_g7")  # ← ALTERADO
+    @discord.ui.button(label="🔐 Gerar Código 2FA G7", style=discord.ButtonStyle.success, custom_id="btn_gerar_2fa_g7")
     async def gerar_2fa_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             await interaction.response.send_modal(Modal2FA())
@@ -419,9 +416,9 @@ class VariacoesView(discord.ui.View):
             ))
         
         select = discord.ui.Select(
-            placeholder="Escolha uma opção G7...",  # ← ALTERADO
+            placeholder="Escolha uma opção G7...",
             options=options,
-            custom_id="select_variacao_g7"  # ← ALTERADO
+            custom_id="select_variacao_g7"
         )
         select.callback = self.select_callback
         self.add_item(select)
@@ -439,7 +436,7 @@ class VariacoesView(discord.ui.View):
             
             if qtd_estoque == 0 and produto_info.get("tipo") == "auto":
                 await interaction.followup.send(
-                    f"❌ **{variacao['nome']} está esgotado!** Aguarde reposição G7.",  # ← ALTERADO
+                    f"❌ **{variacao['nome']} está esgotado!** Aguarde reposição G7.",
                     ephemeral=True
                 )
                 return
@@ -463,8 +460,8 @@ class VariacoesView(discord.ui.View):
             )
             
             embed_pix = discord.Embed(
-                title="🧾 PAGAMENTO PIX G7",  # ← ALTERADO
-                description=f"**Produto G7:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}",  # ← ALTERADO
+                title="🧾 PAGAMENTO PIX G7",
+                description=f"**Produto G7:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}",
                 color=0x00ff88
             )
             
@@ -476,7 +473,7 @@ class VariacoesView(discord.ui.View):
             except:
                 embed_pix.add_field(name="⏰ Expira em", value="15 minutos", inline=True)
             
-            embed_pix.set_footer(text="Você receberá o produto G7 aqui assim que o pagamento for confirmado!")  # ← ALTERADO
+            embed_pix.set_footer(text="Você receberá o produto G7 aqui assim que o pagamento for confirmado!")
             
             qr_image_data = base64.b64decode(pix_data["qr_code_base64"])
             copiar_view = CopiarPIXView(pix_data["qr_code"])
@@ -497,9 +494,9 @@ class VariacoesView(discord.ui.View):
 # ===============================
 # COMANDOS DE ADMIN - ESTOQUE
 # ===============================
-@bot.tree.command(name="add_estoque_g7", description="[ADMIN] Adicionar itens ao estoque G7")  # ← ALTERADO
+@bot.tree.command(name="add_estoque_g7", description="[ADMIN] Adicionar itens ao estoque G7")
 @app_commands.describe(
-    produto_id="ID do produto G7",  # ← ALTERADO
+    produto_id="ID do produto G7",
     itens="Itens separados por | (ex: conta1:senha1 | conta2:senha2)",
     variacao="Nome da variação (opcional)"
 )
@@ -511,11 +508,11 @@ async def add_estoque(
 ):
     try:
         if interaction.user.id != MEU_ID:
-            await interaction.response.send_message("❌ Apenas o dono G7 pode usar este comando.", ephemeral=True)  # ← ALTERADO
+            await interaction.response.send_message("❌ Apenas o dono G7 pode usar este comando.", ephemeral=True)
             return
         
         if produto_id not in produtos_disponiveis:
-            await interaction.response.send_message(f"❌ Produto G7 `{produto_id}` não encontrado!", ephemeral=True)  # ← ALTERADO
+            await interaction.response.send_message(f"❌ Produto G7 `{produto_id}` não encontrado!", ephemeral=True)
             return
         
         novos_itens = [i.strip() for i in itens.split("|") if i.strip()]
@@ -543,7 +540,7 @@ async def add_estoque(
         print(f"❌ Erro ao adicionar estoque G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="ver_estoque_g7", description="[ADMIN] Ver itens no estoque G7")  # ← ALTERADO
+@bot.tree.command(name="ver_estoque_g7", description="[ADMIN] Ver itens no estoque G7")
 @app_commands.describe(produto_id="ID do produto G7", variacao="Nome da variação (opcional)")
 async def ver_estoque(interaction: discord.Interaction, produto_id: str, variacao: str = None):
     try:
@@ -571,11 +568,11 @@ async def ver_estoque(interaction: discord.Interaction, produto_id: str, variaca
             descricao += f"**{i}** - `{item}`\n"
         
         embed = discord.Embed(
-            title=f"📦 ESTOQUE G7 - {produto['nome']}",  # ← ALTERADO
+            title=f"📦 ESTOQUE G7 - {produto['nome']}",
             description=descricao,
             color=0x2b2d31
         )
-        embed.set_footer(text=f"Total: {len(itens)} itens G7 | Use /remover_estoque_g7 com o índice")  # ← ALTERADO
+        embed.set_footer(text=f"Total: {len(itens)} itens G7 | Use /remover_estoque_g7 com o índice")
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
@@ -585,9 +582,9 @@ async def ver_estoque(interaction: discord.Interaction, produto_id: str, variaca
 # ===============================
 # COMANDOS DE ADMIN - VARIAÇÕES
 # ===============================
-@bot.tree.command(name="add_variacao_g7", description="[ADMIN] Adicionar variação a um produto G7")  # ← ALTERADO
+@bot.tree.command(name="add_variacao_g7", description="[ADMIN] Adicionar variação a um produto G7")
 @app_commands.describe(
-    produto_id="ID do produto G7",  # ← ALTERADO
+    produto_id="ID do produto G7",
     nome="Nome da variação (ex: Completo, Apenas Conta, Premium)",
     preco="Preço da variação em R$"
 )
@@ -616,7 +613,7 @@ async def add_variacao(
         salvar_produtos(produtos_disponiveis)
         
         await interaction.response.send_message(
-            f"✅ Variação G7 adicionada!\n\n"  # ← ALTERADO
+            f"✅ Variação G7 adicionada!\n\n"
             f"📦 Produto G7: {produtos_disponiveis[produto_id]['nome']}\n"
             f"🎮 Opção: {nome}\n"
             f"💰 Preço: R$ {preco:.2f}",
@@ -626,7 +623,7 @@ async def add_variacao(
         print(f"❌ Erro ao adicionar variação G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="listar_variacoes_g7", description="[ADMIN] Listar variações de um produto G7")  # ← ALTERADO
+@bot.tree.command(name="listar_variacoes_g7", description="[ADMIN] Listar variações de um produto G7")
 @app_commands.describe(produto_id="ID do produto G7")
 async def listar_variacoes(interaction: discord.Interaction, produto_id: str):
     try:
@@ -650,18 +647,18 @@ async def listar_variacoes(interaction: discord.Interaction, produto_id: str):
             descricao += f"**{i}** - {v['nome']} - R$ {v['preco']:.2f}\n"
         
         embed = discord.Embed(
-            title=f"📦 VARIAÇÕES G7 - {produto['nome']}",  # ← ALTERADO
+            title=f"📦 VARIAÇÕES G7 - {produto['nome']}",
             description=descricao,
             color=0x2b2d31
         )
-        embed.set_footer(text="Use /editar_variacao_g7 ou /remover_variacao_g7 com o índice")  # ← ALTERADO
+        embed.set_footer(text="Use /editar_variacao_g7 ou /remover_variacao_g7 com o índice")
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
         print(f"❌ Erro ao listar variações G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="editar_variacao_g7", description="[ADMIN] Editar nome ou preço de uma variação G7")  # ← ALTERADO
+@bot.tree.command(name="editar_variacao_g7", description="[ADMIN] Editar nome ou preço de uma variação G7")
 @app_commands.describe(
     produto_id="ID do produto G7",
     indice="Índice da variação (use /listar_variacoes_g7 para ver)",
@@ -707,7 +704,7 @@ async def editar_variacao(
         print(f"❌ Erro ao editar variação G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="remover_variacao_g7", description="[ADMIN] Remover variação de um produto G7")  # ← ALTERADO
+@bot.tree.command(name="remover_variacao_g7", description="[ADMIN] Remover variação de um produto G7")
 @app_commands.describe(
     produto_id="ID do produto G7",
     indice="Número da variação (use /listar_variacoes_g7 para ver)"
@@ -748,7 +745,7 @@ async def remover_variacao(
 # ===============================
 # COMANDOS DE CLIENTE
 # ===============================
-@bot.tree.command(name="produtos_g7", description="Ver todos os produtos G7 disponíveis")  # ← ALTERADO
+@bot.tree.command(name="produtos_g7", description="Ver todos os produtos G7 disponíveis")
 async def listar_produtos(interaction: discord.Interaction):
     try:
         if not produtos_disponiveis:
@@ -756,8 +753,8 @@ async def listar_produtos(interaction: discord.Interaction):
             return
         
         embed = discord.Embed(
-            title="🛒 G7 STORE - PRODUTOS",  # ← ALTERADO
-            description="Use `/comprar_g7 [id]` para adquirir qualquer produto G7!",  # ← ALTERADO
+            title="🛒 G7 STORE - PRODUTOS",
+            description="Use `/comprar_g7 [id]` para adquirir qualquer produto G7!",
             color=0x2b2d31,
             timestamp=datetime.now()
         )
@@ -766,7 +763,7 @@ async def listar_produtos(interaction: discord.Interaction):
             tipo_texto = "Automática" if prod.get('tipo') == 'auto' else "Manual"
             qtd_variacoes = len(prod.get("variacoes", []))
             qtd_estoque = verificar_estoque(key)
-            estoque_texto = f" | {qtd_estoque} em estoque G7" if prod.get('tipo') == 'auto' else ""  # ← ALTERADO
+            estoque_texto = f" | {qtd_estoque} em estoque G7" if prod.get('tipo') == 'auto' else ""
             variacoes_texto = f" | {qtd_variacoes} opções" if qtd_variacoes > 0 else ""
             
             embed.add_field(
@@ -792,7 +789,7 @@ async def criar_embed_produto_tzada(produto_id: str, produto_info: dict):
         imagem_url = produto_info.get('imagem', '')
         qtd_variacoes = len(produto_info.get("variacoes", []))
         qtd_estoque = verificar_estoque(produto_id)
-        tipo_entrega = "🤖 Entrega Automática G7!" if produto_info.get('tipo') == 'auto' else "👨‍💼 Entrega Manual G7"  # ← ALTERADO
+        tipo_entrega = "🤖 Entrega Automática G7!" if produto_info.get('tipo') == 'auto' else "👨‍💼 Entrega Manual G7"
         
         descricao = produto_info.get('descricao', 'Sem descrição')
         
@@ -804,7 +801,7 @@ async def criar_embed_produto_tzada(produto_id: str, produto_info: dict):
         
         estoque_info = ""
         if produto_info.get('tipo') == 'auto':
-            estoque_info = f"\n📦 Estoque G7: {qtd_estoque} unidades"  # ← ALTERADO
+            estoque_info = f"\n📦 Estoque G7: {qtd_estoque} unidades"
         
         embed = discord.Embed(
             color=0xffa500
@@ -817,26 +814,26 @@ async def criar_embed_produto_tzada(produto_id: str, produto_info: dict):
         embed.description = f"**{produto_info['nome']}**\n\n{descricao_formatada}{estoque_info}"
         
         embed.add_field(
-            name="💰 Valor à vista G7",  # ← ALTERADO
+            name="💰 Valor à vista G7",
             value=f"R$ {produto_info['preco']:.2f}",
             inline=True
         )
         
         if produto_info.get('tipo') == 'auto':
             embed.add_field(
-                name="📦 Restam G7",  # ← ALTERADO
+                name="📦 Restam G7",
                 value=f"{qtd_estoque}",
                 inline=True
             )
         
         if qtd_variacoes > 0:
             embed.add_field(
-                name="🎮 Opções Disponíveis G7",  # ← ALTERADO
+                name="🎮 Opções Disponíveis G7",
                 value=f"{qtd_variacoes} variações",
                 inline=True
             )
         
-        embed.set_footer(text="G7 STORE - Clique no botão abaixo para comprar!")  # ← ALTERADO
+        embed.set_footer(text="G7 STORE - Clique no botão abaixo para comprar!")
         embed.timestamp = datetime.now()
         
         return embed
@@ -851,7 +848,7 @@ class ProdutoCompraView(discord.ui.View):
         self.produto_nome = produto_nome
         self.variacoes = variacoes or []
     
-    @discord.ui.button(label="🛒 Comprar G7", style=discord.ButtonStyle.success, custom_id="btn_comprar_g7")  # ← ALTERADO
+    @discord.ui.button(label="🛒 Comprar G7", style=discord.ButtonStyle.success, custom_id="btn_comprar_g7")
     async def comprar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         
@@ -859,7 +856,7 @@ class ProdutoCompraView(discord.ui.View):
             if self.variacoes and len(self.variacoes) > 0:
                 view = VariacoesView(self.produto_id, self.produto_nome, self.variacoes)
                 await interaction.followup.send(
-                    f"📦 **{self.produto_nome}**\n\nSelecione a opção G7 desejada:",  # ← ALTERADO
+                    f"📦 **{self.produto_nome}**\n\nSelecione a opção G7 desejada:",
                     view=view,
                     ephemeral=True
                 )
@@ -888,7 +885,7 @@ class ProdutoCompraView(discord.ui.View):
             )
             
             embed_pix = discord.Embed(
-                title="🧾 PAGAMENTO PIX G7",  # ← ALTERADO
+                title="🧾 PAGAMENTO PIX G7",
                 description=f"**Produto G7:** {pix_data['produto']}\n**Valor:** R$ {pix_data['preco']:.2f}",
                 color=0x00ff88
             )
@@ -922,9 +919,9 @@ class ProdutoCompraView(discord.ui.View):
 # ===============================
 # COMANDOS DE ADMIN - CONFIGURAÇÃO
 # ===============================
-@bot.tree.command(name="configurar_produto_g7", description="[ADMIN] Criar/atualizar canal de um produto G7")  # ← ALTERADO
+@bot.tree.command(name="configurar_produto_g7", description="[ADMIN] Criar/atualizar canal de um produto G7")
 @app_commands.describe(
-    produto_id="ID do produto G7",  # ← ALTERADO
+    produto_id="ID do produto G7",
     nome_canal="Nome do canal"
 )
 async def configurar_produto(
@@ -968,7 +965,7 @@ async def configurar_produto(
         except:
             pass
 
-@bot.tree.command(name="remover_estoque_g7", description="🗑️ Remove itens específicos do estoque G7")  # ← ALTERADO
+@bot.tree.command(name="remover_estoque_g7", description="🗑️ Remove itens específicos do estoque G7")
 @app_commands.describe(
     produto_id="ID do produto G7",
     indice="Número do item a remover (veja com /ver_estoque_g7)",
@@ -1035,7 +1032,7 @@ async def remover_estoque(interaction: discord.Interaction, produto_id: str, ind
         print(f"❌ Erro ao remover estoque G7: {e}")
         await interaction.followup.send(f"❌ Erro ao remover estoque G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="sincronizar_canal_g7", description="[ADMIN] Atualizar embed de um canal G7 existente")  # ← ALTERADO
+@bot.tree.command(name="sincronizar_canal_g7", description="[ADMIN] Atualizar embed de um canal G7 existente")
 @app_commands.describe(produto_id="ID do produto G7")
 async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
     try:
@@ -1070,7 +1067,7 @@ async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
         except:
             pass
 
-@bot.tree.command(name="configurar_2fa_g7", description="[ADMIN] Configurar canal de 2FA G7 com botão")  # ← ALTERADO
+@bot.tree.command(name="configurar_2fa_g7", description="[ADMIN] Configurar canal de 2FA G7 com botão")
 async def configurar_2fa(interaction: discord.Interaction):
     try:
         if interaction.user.id != MEU_ID:
@@ -1078,14 +1075,14 @@ async def configurar_2fa(interaction: discord.Interaction):
             return
         
         embed = discord.Embed(
-            title="🔐 GERADOR DE CÓDIGO 2FA G7",  # ← ALTERADO
+            title="🔐 GERADOR DE CÓDIGO 2FA G7",
             description="Clique no botão abaixo para gerar seu código 2FA G7 de forma rápida e segura.\n\n"
                         "1️⃣ Clique em **Gerar Código 2FA G7**\n"
                         "2️⃣ Cole sua chave secreta\n"
                         "3️⃣ O bot enviará o código atual para você!",
             color=0x00ff88
         )
-        embed.set_footer(text="G7 STORE - Segurança em primeiro lugar")  # ← ALTERADO
+        embed.set_footer(text="G7 STORE - Segurança em primeiro lugar")
         
         await interaction.channel.send(embed=embed, view=Canal2FAView())
         await interaction.response.send_message("✅ Canal de 2FA G7 configurado!", ephemeral=True)
@@ -1093,7 +1090,7 @@ async def configurar_2fa(interaction: discord.Interaction):
         print(f"❌ Erro ao configurar 2FA G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="set_imagem_g7", description="[ADMIN] Definir imagem de um produto G7")  # ← ALTERADO
+@bot.tree.command(name="set_imagem_g7", description="[ADMIN] Definir imagem de um produto G7")
 @app_commands.describe(produto_id="ID do produto G7", url_imagem="URL da imagem")
 async def set_imagem(interaction: discord.Interaction, produto_id: str, url_imagem: str):
     try:
@@ -1119,7 +1116,7 @@ async def set_imagem(interaction: discord.Interaction, produto_id: str, url_imag
 # ===============================
 # COMANDOS DE ADMIN (GERENCIAMENTO BASE)
 # ===============================
-@bot.tree.command(name="criar_produto_g7", description="[ADMIN] Criar um novo produto G7")  # ← ALTERADO
+@bot.tree.command(name="criar_produto_g7", description="[ADMIN] Criar um novo produto G7")
 @app_commands.describe(
     id="ID único do produto G7",
     nome="Nome do produto G7",
@@ -1172,7 +1169,7 @@ async def criar_produto(
         print(f"❌ Erro ao criar produto G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="editar_preco_g7", description="[ADMIN] Alterar preço de um produto G7")  # ← ALTERADO
+@bot.tree.command(name="editar_preco_g7", description="[ADMIN] Alterar preço de um produto G7")
 @app_commands.describe(
     produto_id="ID do produto G7",
     novo_preco="Novo preço em R$"
@@ -1200,7 +1197,7 @@ async def editar_preco(interaction: discord.Interaction, produto_id: str, novo_p
         print(f"❌ Erro ao editar preço G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="editar_produto_g7", description="[ADMIN] Alterar nome/descrição G7")  # ← ALTERADO
+@bot.tree.command(name="editar_produto_g7", description="[ADMIN] Alterar nome/descrição G7")
 @app_commands.describe(
     produto_id="ID do produto G7",
     novo_nome="Novo nome (opcional)",
@@ -1238,7 +1235,7 @@ async def editar_produto(
         print(f"❌ Erro ao editar produto G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="remover_produto_g7", description="[ADMIN] Remover um produto G7")  # ← ALTERADO
+@bot.tree.command(name="remover_produto_g7", description="[ADMIN] Remover um produto G7")
 @app_commands.describe(produto_id="ID do produto G7")
 async def remover_produto(interaction: discord.Interaction, produto_id: str):
     try:
@@ -1258,7 +1255,7 @@ async def remover_produto(interaction: discord.Interaction, produto_id: str):
         print(f"❌ Erro ao remover produto G7: {e}")
         await interaction.response.send_message(f"❌ Erro G7: {e}", ephemeral=True)
 
-@bot.tree.command(name="entregar_g7", description="[ADMIN] Entregar produto manual do estoque G7")  # ← ALTERADO
+@bot.tree.command(name="entregar_g7", description="[ADMIN] Entregar produto manual do estoque G7")
 @app_commands.describe(
     usuario="ID do usuário",
     produto_id="ID do produto G7",
@@ -1321,12 +1318,12 @@ async def entregar_produto(
         canal_pagos = bot.get_channel(CANAL_PAGOS)
         if canal_pagos:
             embed = discord.Embed(
-                title="📦 PRODUTO G7 ENTREGUE",  # ← ALTERADO
+                title="📦 PRODUTO G7 ENTREGUE",
                 color=0x3498db,
                 timestamp=datetime.now()
             )
             embed.add_field(name="👤 Cliente", value=user.mention, inline=True)
-            embed.add_field(name="📦 Produto G7", value=produto['nome'], inline=True)  # ← ALTERADO
+            embed.add_field(name="📦 Produto G7", value=produto['nome'], inline=True)
             embed.add_field(name="🔐 Item", value=f"`{item}`", inline=False)
             embed.set_footer(text=f"Entregue G7 por: {interaction.user.name}")
             await canal_pagos.send(embed=embed)
@@ -1339,7 +1336,7 @@ async def entregar_produto(
         except:
             pass
 
-@bot.tree.command(name="backup_g7", description="[ADMIN] Fazer backup dos produtos G7")  # ← ALTERADO
+@bot.tree.command(name="backup_g7", description="[ADMIN] Fazer backup dos produtos G7")
 async def fazer_backup(interaction: discord.Interaction):
     try:
         if interaction.user.id != MEU_ID:
@@ -1362,7 +1359,7 @@ async def fazer_backup(interaction: discord.Interaction):
 # ===============================
 # COMANDO 2FA
 # ===============================
-@bot.tree.command(name="2fa_g7", description="Gerar código 2FA G7 a partir da chave")  # ← ALTERADO
+@bot.tree.command(name="2fa_g7", description="Gerar código 2FA G7 a partir da chave")
 @app_commands.describe(chave="Sua chave 2FA G7 (ex: 7J64V3P3E77J3LKNUGSZ5QANTLRLTKVL)")
 async def gerar_2fa(interaction: discord.Interaction, chave: str):
     try:
