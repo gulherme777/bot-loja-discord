@@ -5,7 +5,7 @@ import time
 
 print("🚀 Iniciando Bot no Render...")
 
-# 🔥 MUDE AQUI - AGORA USA DISCORD_TOKEN_G7
+# 🔥 USA DISCORD_TOKEN_G7 (igual está no Render)
 token = os.environ.get("DISCORD_TOKEN_G7", "")
 
 if not token:
