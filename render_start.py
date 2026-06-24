@@ -5,11 +5,11 @@ import time
 
 print("🚀 Iniciando Bot no Render...")
 
-# Pega o token
-token = os.environ.get("DISCORD_TOKEN", "")
+# 🔥 MUDE AQUI - AGORA USA DISCORD_TOKEN_G7
+token = os.environ.get("DISCORD_TOKEN_G7", "")
 
 if not token:
-    print("❌ ERRO: DISCORD_TOKEN não configurado!")
+    print("❌ ERRO: DISCORD_TOKEN_G7 não configurado!")
     print("🔍 Variáveis disponíveis:")
     for key in os.environ.keys():
         if "TOKEN" in key or "DISCORD" in key:
@@ -18,7 +18,6 @@ if not token:
 
 print("✅ Token encontrado!")
 
-# Importa o bot e o app Flask do bot.py
 try:
     from bot import bot, app
     print("✅ Bot e Flask importados com sucesso!")
@@ -31,7 +30,6 @@ def run_flask():
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 if __name__ == "__main__":
-    # Inicia o Flask
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     print(f"✅ Servidor Flask rodando na porta {os.environ.get('PORT', 5000)}")
