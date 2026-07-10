@@ -9,11 +9,12 @@ import sys
 import time
 import base64
 import json
+import io
 from datetime import datetime
 from io import BytesIO
 import pyotp
 
-print("🔧 Iniciando bot da NOVA LOJA...")
+print("🔧 Iniciando bot da NOVA LOJA (Versão Completa)...")
 
 # ===============================
 # CONFIG (TUDO VIA VARIÁVEIS DE AMBIENTE)
@@ -22,17 +23,15 @@ DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", os.environ.get("DISCORD_TOKEN_G7
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://bot-discord-loja-eg7u.onrender.com/webhook")
 
-ARQUIVO_PRODUTO = "produto.txt"
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
 ARQUIVO_ESTOQUE_JSON = "estoque.json"
 ARQUIVO_PAGAMENTOS_PROCESSADOS = "pagamentos.json"
 
 # ========== CONFIGURAÇÕES DA LOJA ==========
-GUILD_ID = 1513768859838971924
+MEU_ID = 1286512677958713344  # Substitua pelo seu ID se necessário
 CANAL_CARRINHOS = 1521749470075682856
 CANAL_PAGOS = 1521749470075682859
-MEU_ID = 1286512677958713344
-CARGO_ADMIN = 1286512677958713344
+CARGO_ADMIN = 1286512677958713344 # Pode ser ID de cargo ou usuário
 
 carrinhos_ativos = {}
 
@@ -208,7 +207,10 @@ class Modal2FA(discord.ui.Modal, title="Gerar Código 2FA"):
             await interaction.response.defer(ephemeral=True)
             totp = pyotp.TOTP(self.chave.value.strip().upper())
             codigo = totp.now()
-            embed = discord.Embed(title="🔐 CÓDIGO 2FA GERADO", description=f"📋 **CÓDIGO:** ```{codigo}```", color=0x00ff88)
+            tempo_restante = totp.interval - (int(time.time()) % totp.interval)
+            embed = discord.Embed(title="🔐 CÓDIGO 2FA GERADO", color=0x00ff88)
+            embed.add_field(name="📋 **CÓDIGO:**", value=f"```{codigo}```", inline=False)
+            embed.add_field(name="⏰ **VÁLIDO POR:**", value=f"{tempo_restante} segundos", inline=True)
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e: await interaction.followup.send(f"❌ Erro: {e}", ephemeral=True)
 
@@ -277,9 +279,30 @@ class MyBot(discord.Client):
 bot = MyBot()
 
 # ===============================
-# COMANDOS ADMIN
+# COMANDOS DE CLIENTE
 # ===============================
-@bot.tree.command(name="criar_produto")
+@bot.tree.command(name="produtos", description="Ver todos os produtos disponíveis")
+async def listar_produtos_cliente(interaction: discord.Interaction):
+    if not produtos_disponiveis:
+        await interaction.response.send_message("📦 Nenhum produto cadastrado.", ephemeral=True); return
+    embed = discord.Embed(title="🛒 M7 STORE - PRODUTOS", color=0x2b2d31, timestamp=datetime.now())
+    for k, p in produtos_disponiveis.items():
+        qtd = verificar_estoque(k)
+        embed.add_field(name=f"📦 {p['nome']}", value=f"💰 R$ {p['preco']:.2f}\n🆔 `{k}`\n📦 Estoque: {qtd}", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="2fa", description="Gerar código 2FA a partir da chave")
+async def gerar_2fa(interaction: discord.Interaction, chave: str):
+    try:
+        totp = pyotp.TOTP(chave.strip().upper())
+        codigo = totp.now()
+        await interaction.response.send_message(f"🔐 Código: `{codigo}`", ephemeral=True)
+    except: await interaction.response.send_message("❌ Chave inválida.", ephemeral=True)
+
+# ===============================
+# COMANDOS ADMIN - GESTÃO DE PRODUTOS
+# ===============================
+@bot.tree.command(name="criar_produto", description="[ADMIN] Criar um novo produto")
 async def criar_produto(interaction: discord.Interaction, id: str, nome: str, preco: float, descricao: str, tipo: str = "auto"):
     if interaction.user.id != MEU_ID: return
     produtos_disponiveis[id] = {"nome": nome, "preco": preco, "descricao": descricao, "tipo": tipo, "imagem": "", "variacoes": []}
@@ -288,7 +311,75 @@ async def criar_produto(interaction: discord.Interaction, id: str, nome: str, pr
     salvar_estoque(estoque_disponivel)
     await interaction.response.send_message(f"✅ Produto `{nome}` criado!", ephemeral=True)
 
-@bot.tree.command(name="add_estoque")
+@bot.tree.command(name="editar_produto", description="[ADMIN] Alterar nome/descrição")
+async def editar_produto(interaction: discord.Interaction, produto_id: str, novo_nome: str = None, nova_descricao: str = None):
+    if interaction.user.id != MEU_ID: return
+    if produto_id in produtos_disponiveis:
+        if novo_nome: produtos_disponiveis[produto_id]["nome"] = novo_nome
+        if nova_descricao: produtos_disponiveis[produto_id]["descricao"] = nova_descricao
+        salvar_produtos(produtos_disponiveis)
+        await interaction.response.send_message("✅ Produto atualizado!", ephemeral=True)
+
+@bot.tree.command(name="editar_preco", description="[ADMIN] Alterar preço de um produto")
+async def editar_preco(interaction: discord.Interaction, produto_id: str, novo_preco: float):
+    if interaction.user.id != MEU_ID: return
+    if produto_id in produtos_disponiveis:
+        produtos_disponiveis[produto_id]["preco"] = novo_preco
+        salvar_produtos(produtos_disponiveis)
+        await interaction.response.send_message("✅ Preço atualizado!", ephemeral=True)
+
+@bot.tree.command(name="remover_produto", description="[ADMIN] Remover um produto")
+async def remover_produto(interaction: discord.Interaction, produto_id: str):
+    if interaction.user.id != MEU_ID: return
+    if produto_id in produtos_disponiveis:
+        produtos_disponiveis.pop(produto_id)
+        salvar_produtos(produtos_disponiveis)
+        await interaction.response.send_message("✅ Produto removido!", ephemeral=True)
+
+# ===============================
+# COMANDOS ADMIN - VARIAÇÕES
+# ===============================
+@bot.tree.command(name="add_variacao", description="[ADMIN] Adicionar variação a um produto")
+async def add_variacao(interaction: discord.Interaction, produto_id: str, nome: str, preco: float):
+    if interaction.user.id != MEU_ID: return
+    if produto_id in produtos_disponiveis:
+        produtos_disponiveis[produto_id].setdefault("variacoes", []).append({"nome": nome, "preco": preco})
+        salvar_produtos(produtos_disponiveis)
+        await interaction.response.send_message(f"✅ Variação `{nome}` adicionada!", ephemeral=True)
+
+@bot.tree.command(name="listar_variacoes", description="[ADMIN] Listar variações de um produto")
+async def listar_variacoes(interaction: discord.Interaction, produto_id: str):
+    if interaction.user.id != MEU_ID: return
+    p = produtos_disponiveis.get(produto_id)
+    if p and p.get("variacoes"):
+        txt = "\n".join([f"**{i}** - {v['nome']} (R$ {v['preco']:.2f})" for i, v in enumerate(p["variacoes"])])
+        await interaction.response.send_message(f"🎮 Variações de {p['nome']}:\n{txt}", ephemeral=True)
+    else: await interaction.response.send_message("❌ Nenhuma variação.", ephemeral=True)
+
+@bot.tree.command(name="editar_variacao", description="[ADMIN] Editar nome ou preço de uma variação")
+async def editar_variacao(interaction: discord.Interaction, produto_id: str, indice: int, novo_nome: str = None, novo_preco: float = None):
+    if interaction.user.id != MEU_ID: return
+    p = produtos_disponiveis.get(produto_id)
+    if p and 0 <= indice < len(p.get("variacoes", [])):
+        v = p["variacoes"][indice]
+        if novo_nome: v["nome"] = novo_nome
+        if novo_preco: v["preco"] = novo_preco
+        salvar_produtos(produtos_disponiveis)
+        await interaction.response.send_message("✅ Variação editada!", ephemeral=True)
+
+@bot.tree.command(name="remover_variacao", description="[ADMIN] Remover variação de um produto")
+async def remover_variacao(interaction: discord.Interaction, produto_id: str, indice: int):
+    if interaction.user.id != MEU_ID: return
+    p = produtos_disponiveis.get(produto_id)
+    if p and 0 <= indice < len(p.get("variacoes", [])):
+        p["variacoes"].pop(indice)
+        salvar_produtos(produtos_disponiveis)
+        await interaction.response.send_message("✅ Variação removida!", ephemeral=True)
+
+# ===============================
+# COMANDOS ADMIN - ESTOQUE
+# ===============================
+@bot.tree.command(name="add_estoque", description="[ADMIN] Adicionar itens ao estoque")
 async def add_estoque(interaction: discord.Interaction, produto_id: str, itens: str, variacao: str = None):
     if interaction.user.id != MEU_ID: return
     novos = [i.strip() for i in itens.split("|") if i.strip()]
@@ -301,7 +392,43 @@ async def add_estoque(interaction: discord.Interaction, produto_id: str, itens: 
         salvar_estoque(estoque_disponivel)
     await interaction.response.send_message(f"✅ {len(novos)} itens adicionados!", ephemeral=True)
 
-@bot.tree.command(name="configurar_produto")
+@bot.tree.command(name="ver_estoque", description="[ADMIN] Ver itens no estoque")
+async def ver_estoque(interaction: discord.Interaction, produto_id: str, variacao: str = None):
+    if interaction.user.id != MEU_ID: return
+    e = estoque_disponivel.get(produto_id, {})
+    itens = e.get("variacoes", {}).get(variacao, []) if variacao else e.get("itens", [])
+    if not itens: await interaction.response.send_message("📦 Estoque vazio.", ephemeral=True); return
+    txt = "\n".join([f"**{i}** - `{item}`" for i, item in enumerate(itens)])
+    await interaction.response.send_message(f"📦 Estoque {produto_id}:\n{txt[:1900]}", ephemeral=True)
+
+@bot.tree.command(name="remover_estoque", description="🗑️ Remove itens específicos do estoque")
+async def remover_estoque(interaction: discord.Interaction, produto_id: str, indice: int, variacao: str = None):
+    if interaction.user.id != MEU_ID: return
+    with estoque_lock:
+        e = estoque_disponivel.get(produto_id, {})
+        lista = e.get("variacoes", {}).get(variacao) if variacao else e.get("itens")
+        if lista and 0 <= indice < len(lista):
+            removido = lista.pop(indice)
+            salvar_estoque(estoque_disponivel)
+            await interaction.response.send_message(f"✅ Removido: `{removido}`", ephemeral=True)
+        else: await interaction.response.send_message("❌ Índice inválido.", ephemeral=True)
+
+@bot.tree.command(name="entregar", description="[ADMIN] Entregar produto manual do estoque")
+async def entregar_admin(interaction: discord.Interaction, usuario: str, produto_id: str, indice: int = 0):
+    if interaction.user.id != MEU_ID: return
+    try:
+        user = await bot.fetch_user(int(usuario))
+        item = entregar_do_estoque(produto_id) # Simplificado para pegar o primeiro se indice não for usado na lógica base
+        if item:
+            await user.send(f"🎮 **Sua entrega chegou!**\n```{item}```")
+            await interaction.response.send_message(f"✅ Entregue para {user.name}!", ephemeral=True)
+        else: await interaction.response.send_message("❌ Estoque vazio.", ephemeral=True)
+    except: await interaction.response.send_message("❌ Erro ao entregar.", ephemeral=True)
+
+# ===============================
+# COMANDOS ADMIN - CONFIG E BACKUP
+# ===============================
+@bot.tree.command(name="configurar_produto", description="[ADMIN] Criar/atualizar canal de um produto")
 async def configurar_produto(interaction: discord.Interaction, produto_id: str, nome_canal: str):
     if interaction.user.id != MEU_ID: return
     await interaction.response.defer(ephemeral=True)
@@ -315,28 +442,40 @@ async def configurar_produto(interaction: discord.Interaction, produto_id: str, 
     await canal.send(embed=emb, view=ProdutoCompraView(produto_id, p['nome'], p.get('variacoes')))
     await interaction.followup.send("✅ Configurado!", ephemeral=True)
 
-@bot.tree.command(name="add_variacao")
-async def add_variacao(interaction: discord.Interaction, produto_id: str, nome: str, preco: float):
+@bot.tree.command(name="sincronizar_canal", description="[ADMIN] Atualizar embed de um canal existente")
+async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
     if interaction.user.id != MEU_ID: return
-    if produto_id in produtos_disponiveis:
-        produtos_disponiveis[produto_id].setdefault("variacoes", []).append({"nome": nome, "preco": preco})
-        salvar_produtos(produtos_disponiveis)
-        await interaction.response.send_message(f"✅ Variação `{nome}` adicionada!", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    p = produtos_disponiveis.get(produto_id)
+    if p:
+        emb = discord.Embed(title=f"⚡ {p['nome']}", description=p['descricao'].replace('|', '\n✅ '), color=0xffa500)
+        if p.get('imagem'): emb.set_image(url=p['imagem'])
+        emb.add_field(name="💰 Valor", value=f"R$ {p['preco']:.2f}")
+        await interaction.channel.purge(limit=5)
+        await interaction.channel.send(embed=emb, view=ProdutoCompraView(produto_id, p['nome'], p.get('variacoes')))
+        await interaction.followup.send("✅ Sincronizado!", ephemeral=True)
 
-@bot.tree.command(name="configurar_2fa")
+@bot.tree.command(name="configurar_2fa", description="[ADMIN] Configurar canal de 2FA com botão")
 async def configurar_2fa(interaction: discord.Interaction):
     if interaction.user.id != MEU_ID: return
     emb = discord.Embed(title="🔐 GERADOR 2FA", description="Clique abaixo para gerar seu código.", color=0x00ff88)
     await interaction.channel.send(embed=emb, view=Canal2FAView())
     await interaction.response.send_message("✅ 2FA Configurado!", ephemeral=True)
 
-@bot.tree.command(name="set_imagem")
-async def set_imagem(interaction: discord.Interaction, produto_id: str, url: str):
+@bot.tree.command(name="set_imagem", description="[ADMIN] Definir imagem de um produto")
+async def set_imagem(interaction: discord.Interaction, produto_id: str, url_imagem: str):
     if interaction.user.id != MEU_ID: return
     if produto_id in produtos_disponiveis:
-        produtos_disponiveis[produto_id]["imagem"] = url
+        produtos_disponiveis[produto_id]["imagem"] = url_imagem
         salvar_produtos(produtos_disponiveis)
         await interaction.response.send_message("✅ Imagem definida!", ephemeral=True)
+
+@bot.tree.command(name="backup", description="[ADMIN] Fazer backup dos produtos")
+async def backup_produtos(interaction: discord.Interaction):
+    if interaction.user.id != MEU_ID: return
+    data = json.dumps({"produtos": produtos_disponiveis, "estoque": estoque_disponivel}, indent=2)
+    file = discord.File(io.StringIO(data), filename="backup.json")
+    await interaction.response.send_message("✅ Backup gerado!", file=file, ephemeral=True)
 
 # ===============================
 # WEBHOOK SERVER
@@ -375,13 +514,13 @@ async def processar_pagamento(payment_id):
                     if p_info.get("tipo") == "auto":
                         item = entregar_do_estoque(prod_id, var_nome)
                         if item:
-                            await user.send(f"✅ **Pago!**\n📦 **{p_info['nome']}**\n🔐 **Produto:**\n```{item}```")
+                            await user.send(f"✅ **Pagamento confirmado!**\n📦 **{p_info['nome']}**\n🔐 **Seu produto:**\n```{item}```")
                             await log_pagamento_confirmado(user, p_info['nome'], p_data.get('transaction_amount', 0), payment_id, item)
                         else:
-                            await user.send("✅ **Pago!**\n⚠️ Estoque vazio, um admin entregará em breve.")
+                            await user.send("✅ **Pagamento confirmado!**\n⚠️ Estoque vazio, um administrador entregará em breve.")
                     else:
-                        await user.send("✅ **Pago!**\n⏳ Entrega manual, aguarde um admin.")
-    except Exception as e: print(f"❌ Erro webhook proc: {e}")
+                        await user.send("✅ **Pagamento confirmado!**\n⏳ Produto de entrega manual, aguarde um administrador.")
+    except Exception as e: print(f"❌ Erro webhook: {e}")
 
 # ===============================
 # START
