@@ -1392,3 +1392,5 @@ if __name__ == "__main__":
         logger.error(f"❌ Erro fatal: {e}")
         traceback.print_exc()
         sys.exit(1)
+        app = flask_app
+
