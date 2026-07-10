@@ -19,7 +19,7 @@ if not token:
 print("✅ Token encontrado!")
 
 try:
-    from bot import bot, app
+    from bot import bot, flask_app
     print("✅ Bot e Flask importados com sucesso!")
 except ImportError as e:
     print(f"❌ Erro ao importar: {e}")
@@ -27,13 +27,12 @@ except ImportError as e:
 
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     print(f"✅ Servidor Flask rodando na porta {os.environ.get('PORT', 5000)}")
-    
     print("🔄 Iniciando bot Discord...")
     try:
         bot.run(token)
