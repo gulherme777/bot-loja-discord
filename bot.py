@@ -861,6 +861,10 @@ async def cmd_sincronizar(interaction: discord.Interaction, canal: discord.TextC
         timestamp=datetime.now()
     )
     embed.add_field(name="💰 **Preço**", value=f"```R$ {produto['preco']:.2f}```", inline=False)
+    
+    if produto.get("imagem"):
+        embed.set_image(url=produto["imagem"])
+        
     embed.set_footer(text=f"{config.NOME_LOJA} - Clique em Comprar")
     
     view = discord.ui.View(timeout=None)
@@ -1309,6 +1313,31 @@ async def cmd_ping(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="set_imagem", description="[ADMIN] Definir a imagem de um produto")
+@app_commands.describe(
+    produto_id="ID do produto",
+    url="Link da imagem (URL)"
+)
+async def cmd_set_imagem(interaction: discord.Interaction, produto_id: str, url: str):
+    if not is_admin(interaction.user.id):
+        return await interaction.response.send_message("❌ **Sem permissão!**", ephemeral=True)
+    
+    if produto_id not in data_manager.produtos:
+        return await interaction.response.send_message("❌ **Produto não encontrado!**", ephemeral=True)
+    
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return await interaction.response.send_message("❌ **URL inválida!** Certifique-se que o link começa com http:// ou https://", ephemeral=True)
+
+    data_manager.produtos[produto_id]["imagem"] = url
+    data_manager.salvar_todos()
+    
+    embed = discord.Embed(title="✅ **IMAGEM DEFINIDA!**", color=0x00ff88, timestamp=datetime.now())
+    embed.add_field(name="📦 Produto", value=f"```{data_manager.produtos[produto_id]['nome']}```", inline=True)
+    embed.add_field(name="🆔 ID", value=f"```{produto_id}```", inline=True)
+    embed.set_image(url=url)
+    
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="ajuda", description="Mostrar todos os comandos disponíveis")
 async def cmd_ajuda(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -1328,7 +1357,8 @@ async def cmd_ajuda(interaction: discord.Interaction):
               "`/limpar_estoque` - Limpar estoque\n"
               "`/add_variacao` - Adicionar variação\n"
               "`/sincronizar` - Enviar painel\n"
-              "`/setar_canal` - Configurar canais",
+              "`/setar_canal` - Configurar canais\n"
+              "`/set_imagem` - Definir imagem do produto",
         inline=False
     )
     
@@ -1356,7 +1386,8 @@ async def cmd_ajuda(interaction: discord.Interaction):
     
     embed.add_field(
         name="ℹ️ **Geral**",
-        value="`/ajuda` - Mostrar este menu",
+        value="`/ajuda` - Mostrar este menu\n"
+              "`/set_imagem` - Definir imagem do produto",
         inline=False
     )
     
@@ -1393,4 +1424,3 @@ if __name__ == "__main__":
         traceback.print_exc()
         sys.exit(1)
         app = flask_app
-
