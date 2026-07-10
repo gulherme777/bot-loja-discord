@@ -48,11 +48,11 @@ class Config:
     INFINITE_TAG = os.environ.get("INFINITE_TAG", "guilherme_vinicius90")
     PORT = int(os.environ.get("PORT", 10000))
     
-    # IDs dos canais (podem ser alterados via comando)
-    CANAL_CARRINHOS = 1513770446158303304
-    CANAL_PAGOS = 1513770547933089852
-    ADMIN_ID = 1431125477069688953
-    ADMINS = [1431125477069688953]  # Lista de admins
+    # IDs dos canais (Atualizados conforme solicitação do usuário)
+    CANAL_CARRINHOS = 1521749470075682856
+    CANAL_PAGOS = 1521749470075682859
+    ADMIN_ID = 1286512677958713344
+    ADMINS = [1286512677958713344]  # Lista de admins
     
     # URLs
     BASE_URL = "https://api.checkout.infinitepay.io"
@@ -380,123 +380,94 @@ class DeliverySystem:
             try:
                 await canal_pagos.send(embed=embed)
             except Exception as e:
-                logger.error(f"❌ Erro ao enviar para canal de pagamentos: {e}")
-    
+                logger.error(f"❌ Erro ao notificar canal de pagamentos: {e}")
+
     async def _estoque_esgotado(self, usuario, produto, slug):
         try:
-            admin = await self.bot.fetch_user(config.ADMIN_ID)
             embed = discord.Embed(
-                title="🚨 **ESTOQUE ESGOTADO!**",
-                description="Um cliente pagou mas não havia estoque disponível!",
-                color=0xff0000,
-                timestamp=datetime.now()
-            )
-            embed.add_field(name="👤 Cliente", value=usuario.mention, inline=False)
-            embed.add_field(name="📦 Produto", value=f"```{produto}```", inline=False)
-            embed.add_field(name="🆔 Slug", value=f"```{slug}```", inline=True)
-            await admin.send(embed=embed)
-            
-            embed = discord.Embed(
-                title="✅ **PAGAMENTO CONFIRMADO**",
-                description="Seu pagamento foi confirmado com sucesso!",
+                title="⚠️ **ESTOQUE ESGOTADO**",
+                description="Seu pagamento foi confirmado, mas o produto acabou no estoque automático.",
                 color=0xffaa00,
                 timestamp=datetime.now()
             )
             embed.add_field(name="📦 Produto", value=f"```{produto}```", inline=False)
-            embed.add_field(
-                name="⚠️ **ATENÇÃO**", 
-                value="O estoque acabou no momento da compra, mas o administrador já foi notificado e fará sua entrega manual em até 5 minutos!",
-                inline=False
-            )
-            await usuario.send(embed=embed)
-        except Exception as e:
-            logger.error(f"❌ Erro no estoque esgotado: {e}")
-    
-    async def _notificar_erro(self, usuario, erro):
-        try:
-            embed = discord.Embed(
-                title="❌ **ERRO NA ENTREGA**",
-                color=0xff0000,
-                timestamp=datetime.now()
-            )
-            embed.add_field(name="⚠️ Erro", value=f"```{erro}```", inline=False)
+            embed.add_field(name="🆔 Transação", value=f"```{slug}```", inline=False)
+            embed.add_field(name="ℹ️ Info", value="Um administrador foi notificado e fará sua entrega manualmente em breve!", inline=False)
             await usuario.send(embed=embed)
         except:
             pass
-    
-    async def _enviar_no_suporte(self, usuario, produto, item):
+
+    async def _notificar_erro(self, usuario, erro):
         try:
-            canal_suporte = self.bot.get_channel(config.CANAL_PAGOS)
-            if canal_suporte:
-                embed = discord.Embed(
-                    title="📨 ENTREGA POR CANAL (DM BLOQUEADA)",
-                    color=0xffaa00,
-                    timestamp=datetime.now()
-                )
-                embed.add_field(name="👤 Cliente", value=f"{usuario.mention} `{usuario.id}`", inline=False)
-                embed.add_field(name="📦 Produto", value=f"```{produto}```", inline=False)
-                embed.add_field(name="🔐 Item", value=f"```\n{item}\n```", inline=False)
-                await canal_suporte.send(embed=embed)
-        except Exception as e:
-            logger.error(f"❌ Erro ao enviar no suporte: {e}")
+            await usuario.send(f"❌ **Erro no processamento:** {erro}. Entre em contato com o suporte.")
+        except:
+            pass
+
+    async def _enviar_no_suporte(self, usuario, produto, item):
+        # Implementar se necessário um canal de suporte
+        pass
 
 # ===============================
-# BOT PRINCIPAL
+# BOT SETUP
 # ===============================
-class G7StoreBot(discord.Client):
+class G7Bot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+        super().__init__(command_prefix="!", intents=intents)
         self.delivery = DeliverySystem(self)
-        self.loop_entregas = None
-    
-    async def setup_hook(self):
-        try:
-            await self.tree.sync()
-            logger.info("✅ Comandos sincronizados!")
-            self.loop_entregas = asyncio.create_task(self.delivery.iniciar_processamento())
-        except Exception as e:
-            logger.error(f"❌ Erro no setup: {e}")
-    
-    async def on_ready(self):
-        logger.info(f"🟢 Bot Online: {self.user}")
-        await self.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name=f"{len(data_manager.produtos)} produtos | {config.NOME_LOJA}"
-            )
-        )
 
-bot = G7StoreBot()
+    async def setup_hook(self):
+        logger.info("⚙️ Sincronizando comandos slash...")
+        await self.tree.sync()
+        asyncio.create_task(self.delivery.iniciar_processamento())
+
+    async def on_ready(self):
+        logger.info(f"✅ Bot online como {self.user}")
+        await self.change_presence(activity=discord.Game(name=f"Vendas em {config.NOME_LOJA}"))
+
+bot = G7Bot()
+flask_app = Flask(__name__)
 carrinhos_ativos = {}
 
 # ===============================
-# WEBHOOK FLASK
+# WEBHOOK ENDPOINT
 # ===============================
-flask_app = Flask(__name__)
-
 @flask_app.route('/webhook', methods=['POST'])
-def webhook_receiver():
+def webhook():
     try:
         data = request.json
-        logger.info(f"📨 Webhook recebido")
+        logger.info(f"📥 Webhook recebido: {data}")
         
-        if not data or data.get("status") != "paid":
-            return "OK", 200
-        
+        if data.get("status") != "paid":
+            return jsonify({"status": "ignored"}), 200
+            
         slug = data.get("invoice_slug")
         with data_manager.lock:
             if slug in data_manager.pagamentos:
-                return "OK", 200
+                return jsonify({"status": "already_processed"}), 200
             data_manager.pagamentos.add(slug)
             data_manager.salvar_todos()
-        
-        nsu = data.get("order_nsu", "")
-        parts = nsu.split('|')
-        if len(parts) < 3:
-            return "OK", 200
-        
+            
+        # Limpar carrinho do canal
+        if slug in carrinhos_ativos:
+            msg_id = carrinhos_ativos.pop(slug)
+            async def deletar_msg():
+                canal = bot.get_channel(config.CANAL_CARRINHOS)
+                if canal:
+                    try:
+                        msg = await canal.fetch_message(msg_id)
+                        await msg.delete()
+                    except:
+                        pass
+            asyncio.run_coroutine_threadsafe(deletar_msg(), bot.loop)
+
+        # Processar entrega
+        order_nsu = data.get("order_nsu", "")
+        parts = order_nsu.split("|")
+        if len(parts) < 2:
+            logger.error(f"❌ NSU inválido: {order_nsu}")
+            return jsonify({"status": "invalid_nsu"}), 400
+            
         entrega_data = {
             "produto_id": parts[0],
             "usuario_id": int(parts[1]),
@@ -828,8 +799,6 @@ async def cmd_add_variacao(interaction: discord.Interaction, produto_id: str, no
         data_manager.estoque[produto_id] = {"itens": [], "variacoes": {}}
     if "variacoes" not in data_manager.estoque[produto_id]:
         data_manager.estoque[produto_id]["variacoes"] = {}
-    if nome not in data_manager.estoque[produto_id]["variacoes"]:
-        data_manager.estoque[produto_id]["variacoes"][nome] = []
     
     data_manager.salvar_todos()
     
@@ -1423,4 +1392,3 @@ if __name__ == "__main__":
         logger.error(f"❌ Erro fatal: {e}")
         traceback.print_exc()
         sys.exit(1)
-        app = flask_app
