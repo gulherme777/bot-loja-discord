@@ -18,9 +18,9 @@ print("🔧 Iniciando bot da NOVA LOJA...")
 # ===============================
 # CONFIG (TUDO VIA VARIÁVEIS DE AMBIENTE)
 # ===============================
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", os.environ.get("DISCORD_TOKEN_G7", ""))
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")  # ← AGORA PEGA DO .ENV
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
 
 ARQUIVO_PRODUTO = "produto.txt"
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
@@ -32,7 +32,7 @@ if os.path.exists(ARQUIVO_PRODUTO):
 else:
     print("⚠️ produto.txt não encontrado (opcional)")
 
-# ========== CONFIGURAÇÕES DA LOJA (VOCÊ VAI PREENCHER DEPOIS) ==========
+# ========== CONFIGURAÇÕES DA LOJA ==========
 GUILD_ID = 1513768859838971924
 CANAL_CARRINHOS = 1521749470075682856
 CANAL_PAGOS = 1521749470075682859
@@ -53,7 +53,10 @@ estoque_lock = threading.Lock()
 def carregar_pagamentos_processados():
     if os.path.exists(ARQUIVO_PAGAMENTOS_PROCESSADOS):
         with open(ARQUIVO_PAGAMENTOS_PROCESSADOS, 'r', encoding='utf-8') as f:
-            return set(json.load(f))
+            try:
+                return set(json.load(f))
+            except:
+                return set()
     return set()
 
 def salvar_pagamentos_processados(pagamentos):
@@ -69,7 +72,10 @@ print(f"🔒 {len(pagamentos_processados)} pagamentos já processados")
 def carregar_estoque():
     if os.path.exists(ARQUIVO_ESTOQUE_JSON):
         with open(ARQUIVO_ESTOQUE_JSON, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except:
+                return {}
     else:
         estoque_vazio = {}
         salvar_estoque(estoque_vazio)
@@ -88,7 +94,10 @@ print(f"📦 Estoque carregado")
 def carregar_produtos():
     if os.path.exists(ARQUIVO_PRODUTOS_JSON):
         with open(ARQUIVO_PRODUTOS_JSON, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except:
+                return {}
     else:
         produtos_vazio = {}
         salvar_produtos(produtos_vazio)
@@ -101,18 +110,17 @@ def salvar_produtos(produtos):
 # ===============================
 # CONFIG MERCADO PAGO
 # ===============================
+sdk = None
 if not MP_ACCESS_TOKEN:
-    print("❌ MP_ACCESS_TOKEN não configurado no .env!")
-    # sys.exit(1) # Não sai para o bot não morrer, mas avisa
+    print("❌ MP_ACCESS_TOKEN não configurado!")
 else:
     sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
     print("💳 Mercado Pago SDK Inicializado")
 
 def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
-    """Gera um pagamento PIX com logs detalhados para diagnóstico"""
+    if not sdk: return None
     try:
         preco_formatado = round(float(preco), 2)
-        
         payment_data = {
             "transaction_amount": preco_formatado,
             "description": f"Compra: {nome_produto}"[:60],
@@ -125,22 +133,13 @@ def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
             "external_reference": f"{produto_id}_{user_id}_{int(time.time())}",
             "installments": 1
         }
-
         if WEBHOOK_URL and WEBHOOK_URL.startswith("https"):
             payment_data["notification_url"] = WEBHOOK_URL
-
-        print(f"🔍 Tentando gerar PIX de R$ {preco_formatado} para o produto {produto_id}...")
         
         result = sdk.payment().create(payment_data)
-        
-        status_code = result.get("status")
-        response_data = result.get("response")
-
-        if status_code in [200, 201]:
-            payment = response_data
+        if result.get("status") in [200, 201]:
+            payment = result.get("response")
             pix_data = payment.get("point_of_interaction", {}).get("transaction_data", {})
-            
-            print(f"✅ PIX Gerado com sucesso! ID: {payment.get('id')}")
             return {
                 "qr_code": pix_data.get("qr_code"),
                 "qr_code_base64": pix_data.get("qr_code_base64"),
@@ -150,19 +149,9 @@ def criar_pagamento_pix_com_preco(user_id, produto_id, preco, nome_produto):
                 "payment_id": payment.get("id"),
                 "produto_id": produto_id
             }
-        else:
-            print("\n" + "!"*30)
-            print(f"❌ ERRO NA API DO MERCADO PAGO")
-            print(f"Status Code: {status_code}")
-            print(f"Resposta: {json.dumps(response_data, indent=2)}")
-            print("!"*30 + "\n")
-            return None
-
     except Exception as e:
-        print(f"❌ ERRO CRÍTICO NO CÓDIGO DE PAGAMENTO: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+        print(f"❌ Erro pagamento: {e}")
+    return None
 
 # ===============================
 # CONFIG DISCORD BOT
@@ -176,7 +165,6 @@ class MyBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        # self.tree.copy_global_to(guild=discord.Object(id=GUILD_ID))
         await self.tree.sync()
 
 bot = MyBot()
@@ -184,266 +172,136 @@ bot = MyBot()
 # ===============================
 # WEBHOOK SERVER (FLASK)
 # ===============================
-app = Flask(__name__)
+flask_app = Flask(__name__) # Nome alterado para flask_app para compatibilidade com render_start.py
 
-@app.route("/webhook", methods=["POST"])
+@flask_app.route("/webhook", methods=["POST"])
 def webhook():
     global pagamentos_processados
     data = request.json
-    print(f"📥 Webhook recebido: {data}")
-    
     if data.get("action") == "payment.updated" or data.get("type") == "payment":
         payment_id = data.get("data", {}).get("id") or data.get("id")
-        
         if payment_id:
             with webhook_lock:
                 if str(payment_id) in pagamentos_processados:
-                    print(f"⏭️ Pagamento {payment_id} já foi processado anteriormente.")
                     return "OK", 200
-                
                 asyncio.run_coroutine_threadsafe(verificar_pagamento_e_entregar(payment_id), bot.loop)
-    
     return "OK", 200
 
 async def verificar_pagamento_e_entregar(payment_id):
-    global pagamentos_processados, estoque_disponivel
-    
+    if not sdk: return
     try:
-        print(f"🔎 Verificando pagamento {payment_id}...")
         payment_info = sdk.payment().get(payment_id)
-        
-        if payment_info["status"] != 200:
-            return
-
-        payment_data = payment_info["response"]
-        status = payment_data.get("status")
-        
-        if status == "approved":
-            external_ref = payment_data.get("external_reference", "")
-            if not external_ref: return
-            
-            # Formato: produtoID_userID_timestamp
-            parts = external_ref.split("_")
-            if len(parts) < 2: return
-            
-            produto_id = parts[0]
-            user_id = int(parts[1])
-            
-            with webhook_lock:
-                if str(payment_id) in pagamentos_processados:
-                    return
-                
-                pagamentos_processados.add(str(payment_id))
-                salvar_pagamentos_processados(pagamentos_processados)
-
-            # Entregar o produto
-            await entregar_produto(user_id, produto_id, payment_id, payment_data.get("transaction_amount"))
-            
+        if payment_info["status"] == 200:
+            payment_data = payment_info["response"]
+            if payment_data.get("status") == "approved":
+                external_ref = payment_data.get("external_reference", "")
+                parts = external_ref.split("_")
+                if len(parts) >= 2:
+                    produto_id, user_id = parts[0], int(parts[1])
+                    with webhook_lock:
+                        if str(payment_id) not in pagamentos_processados:
+                            pagamentos_processados.add(str(payment_id))
+                            salvar_pagamentos_processados(pagamentos_processados)
+                            await entregar_produto(user_id, produto_id, payment_id, payment_data.get("transaction_amount"))
     except Exception as e:
-        print(f"❌ Erro ao processar pagamento {payment_id}: {e}")
+        print(f"❌ Erro webhook: {e}")
 
 async def entregar_produto(user_id, produto_id, payment_id, valor):
-    global estoque_disponivel
-    
     try:
         user = await bot.fetch_user(user_id)
-        if not user: return
-
         produtos = carregar_produtos()
         nome_produto = produtos.get(produto_id, {}).get("nome", "Produto")
-
         with estoque_lock:
-            estoque_disponivel = carregar_estoque()
-            if produto_id in estoque_disponivel and len(estoque_disponivel[produto_id]) > 0:
-                item_entregue = estoque_disponivel[produto_id].pop(0)
-                salvar_estoque(estoque_disponivel)
-                
-                # Enviar DM
-                embed = discord.Embed(
-                    title="✅ Pagamento Confirmado!",
-                    description=f"Obrigado por comprar na nossa loja!\n\n**Produto:** {nome_produto}\n**Valor:** R$ {valor}\n**ID Transação:** `{payment_id}`",
-                    color=discord.Color.green()
-                )
-                embed.add_field(name="📦 Seu Produto:", value=f"```\n{item_entregue}\n```")
-                
-                try:
-                    await user.send(embed=embed)
-                except:
-                    print(f"❌ Não consegui enviar DM para {user.name}")
-
-                # Log no canal de vendas
-                canal = bot.get_channel(CANAL_PAGOS)
-                if canal:
-                    log_embed = discord.Embed(
-                        title="💰 Nova Venda!",
-                        description=f"**Cliente:** {user.mention} (`{user.id}`)\n**Produto:** {nome_produto}\n**Valor:** R$ {valor}",
-                        color=discord.Color.gold()
-                    )
-                    await canal.send(embed=log_embed)
-            else:
-                # Caso o estoque acabe bem na hora
-                canal_log = bot.get_channel(CANAL_PAGOS)
-                if canal_log:
-                    await canal_log.send(f"⚠️ **ERRO CRÍTICO:** O usuário {user.mention} pagou por `{nome_produto}`, mas o estoque acabou!")
-                
-                try:
-                    await user.send("⚠️ **Ocorreu um problema:** Seu pagamento foi aprovado, mas o estoque do produto acabou no exato momento. Por favor, entre em contato com o administrador.")
+            estoque = carregar_estoque()
+            if produto_id in estoque and len(estoque[produto_id]) > 0:
+                item = estoque[produto_id].pop(0)
+                salvar_estoque(estoque)
+                embed = discord.Embed(title="✅ Pagamento Confirmado!", color=discord.Color.green())
+                embed.add_field(name="📦 Seu Produto:", value=f"```\n{item}\n```")
+                try: await user.send(embed=embed)
                 except: pass
-
+                canal = bot.get_channel(CANAL_PAGOS)
+                if canal: await canal.send(embed=discord.Embed(title="💰 Nova Venda!", description=f"Cliente: {user.mention}\nProduto: {nome_produto}\nValor: R$ {valor}", color=discord.Color.gold()))
+            else:
+                canal = bot.get_channel(CANAL_PAGOS)
+                if canal: await canal.send(f"⚠️ Erro: Estoque vazio para {user.mention} - {nome_produto}")
     except Exception as e:
-        print(f"❌ Erro na entrega: {e}")
-
-def run_flask():
-    app.run(host="0.0.0.0", port=5000)
+        print(f"❌ Erro entrega: {e}")
 
 # ===============================
-# COMANDOS DO BOT
+# COMANDOS
 # ===============================
-
-@bot.tree.command(name="configurar", description="Configura um novo produto para venda")
+@bot.tree.command(name="configurar")
 async def configurar(interaction: discord.Interaction, id_produto: str, nome: str, preco: float):
-    if interaction.user.id != MEU_ID:
-        await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
-        return
-
+    if interaction.user.id != MEU_ID: return
     produtos = carregar_produtos()
     produtos[id_produto] = {"nome": nome, "preco": preco}
     salvar_produtos(produtos)
-    
-    await interaction.response.send_message(f"✅ Produto `{nome}` configurado com ID `{id_produto}` e preço `R$ {preco}`", ephemeral=True)
+    await interaction.response.send_message(f"✅ Configurado: {nome}", ephemeral=True)
 
-@bot.tree.command(name="estoque", description="Adiciona itens ao estoque")
+@bot.tree.command(name="estoque")
 async def estoque(interaction: discord.Interaction, id_produto: str, conteudo: str):
-    if interaction.user.id != MEU_ID:
-        await interaction.response.send_message("❌ Apenas o dono pode usar este comando.", ephemeral=True)
-        return
-
-    global estoque_disponivel
+    if interaction.user.id != MEU_ID: return
     with estoque_lock:
-        estoque_disponivel = carregar_estoque()
-        if id_produto not in estoque_disponivel:
-            estoque_disponivel[id_produto] = []
-        
-        # Pode adicionar vários separados por vírgula ou linha
-        novos_itens = [i.strip() for i in conteudo.replace("\\n", "\n").split("\n") if i.strip()]
-        estoque_disponivel[id_produto].extend(novos_itens)
-        salvar_estoque(estoque_disponivel)
+        estoque = carregar_estoque()
+        if id_produto not in estoque: estoque[id_produto] = []
+        novos = [i.strip() for i in conteudo.replace("\\n", "\n").split("\n") if i.strip()]
+        estoque[id_produto].extend(novos)
+        salvar_estoque(estoque)
+    await interaction.response.send_message(f"✅ Estoque atualizado para {id_produto}", ephemeral=True)
 
-    await interaction.response.send_message(f"✅ Adicionados {len(novos_itens)} itens ao estoque de `{id_produto}`. Total: {len(estoque_disponivel[id_produto])}", ephemeral=True)
-
-@bot.tree.command(name="comprar", description="Gera um pagamento para um produto")
+@bot.tree.command(name="comprar")
 async def comprar(interaction: discord.Interaction, id_produto: str):
     produtos = carregar_produtos()
     if id_produto not in produtos:
-        await interaction.response.send_message("❌ Produto não encontrado!", ephemeral=True)
+        await interaction.response.send_message("❌ Produto não encontrado", ephemeral=True)
         return
-
-    estoque = carregar_estoque()
-    if id_produto not in estoque or len(estoque[id_produto]) == 0:
-        await interaction.response.send_message("❌ Este produto está sem estoque no momento!", ephemeral=True)
-        return
-
     await interaction.response.defer(ephemeral=True)
-
-    nome_p = produtos[id_produto]["nome"]
-    preco_p = produtos[id_produto]["preco"]
-
-    pagamento = criar_pagamento_pix_com_preco(interaction.user.id, id_produto, preco_p, nome_p)
-
-    if pagamento:
-        # Criar Carrinho Ativo
-        embed = discord.Embed(
-            title=f"🛒 Carrinho - {nome_p}",
-            description=f"Olá {interaction.user.mention}, seu pedido foi gerado!\n\n**Valor:** R$ {preco_p}\n\nEscaneie o QR Code ou copie o código abaixo para pagar via PIX.",
-            color=discord.Color.blue()
-        )
-        
-        # QR Code Base64 -> File
+    pag = criar_pagamento_pix_com_preco(interaction.user.id, id_produto, produtos[id_produto]["preco"], produtos[id_produto]["nome"])
+    if pag:
+        embed = discord.Embed(title=f"🛒 {produtos[id_produto]['nome']}", description=f"Valor: R$ {produtos[id_produto]['preco']}", color=discord.Color.blue())
         qr_file = None
-        if pagamento["qr_code_base64"]:
-            img_data = base64.b64decode(pagamento["qr_code_base64"])
-            qr_file = discord.File(BytesIO(img_data), filename="pix.png")
+        if pag["qr_code_base64"]:
+            qr_file = discord.File(BytesIO(base64.b64decode(pag["qr_code_base64"])), filename="pix.png")
             embed.set_image(url="attachment://pix.png")
-
         await interaction.followup.send(embed=embed, file=qr_file)
-        await interaction.followup.send(f"**Copia e Cola:**\n```\n{pagamento['qr_code']}\n```")
-
-        # Log no canal de carrinhos
-        canal_c = bot.get_channel(CANAL_CARRINHOS)
-        if canal_c:
-            log_c = discord.Embed(
-                title="🛒 Novo Carrinho",
-                description=f"**Usuário:** {interaction.user.mention}\n**Produto:** {nome_p}\n**Valor:** R$ {preco_p}",
-                color=discord.Color.blue()
-            )
-            await canal_c.send(embed=log_c)
+        await interaction.followup.send(f"**Copia e Cola:**\n```\n{pag['qr_code']}\n```")
+        canal = bot.get_channel(CANAL_CARRINHOS)
+        if canal: await canal.send(embed=discord.Embed(title="🛒 Novo Carrinho", description=f"Usuário: {interaction.user.mention}\nProduto: {produtos[id_produto]['nome']}", color=discord.Color.blue()))
     else:
-        await interaction.followup.send("❌ Erro ao gerar pagamento. Tente novamente mais tarde.")
+        await interaction.followup.send("❌ Erro ao gerar pagamento")
 
-@bot.tree.command(name="painel", description="Envia o painel de compras (Apenas Admin)")
+@bot.tree.command(name="painel")
 async def painel(interaction: discord.Interaction):
-    if interaction.user.id != MEU_ID:
-        await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
-        return
-
+    if interaction.user.id != MEU_ID: return
     produtos = carregar_produtos()
-    if not produtos:
-        await interaction.response.send_message("❌ Não há produtos configurados.", ephemeral=True)
-        return
-
-    embed = discord.Embed(
-        title="🏪 Nossa Loja",
-        description="Selecione um produto abaixo para comprar via PIX com entrega automática!",
-        color=discord.Color.purple()
-    )
-
+    if not produtos: return
+    embed = discord.Embed(title="🏪 Loja", description="Selecione um produto", color=discord.Color.purple())
     class Dropdown(discord.ui.Select):
         def __init__(self):
-            options = [
-                discord.SelectOption(label=p["nome"], description=f"Preço: R$ {p['preco']}", value=pid)
-                for pid, p in produtos.items()
-            ]
-            super().__init__(placeholder="Escolha um produto...", options=options)
-
+            options = [discord.SelectOption(label=p["nome"], value=pid) for pid, p in produtos.items()]
+            super().__init__(placeholder="Escolha...", options=options)
         async def callback(self, interaction: discord.Interaction):
-            id_p = self.values[0]
-            # Reutiliza a lógica do comando comprar
-            await comprar_logic(interaction, id_p)
-
+            await comprar_logic(interaction, self.values[0])
     async def comprar_logic(inter, id_p):
-        produtos = carregar_produtos()
-        estoque = carregar_estoque()
-        if id_p not in estoque or len(estoque[id_p]) == 0:
-            await inter.response.send_message("❌ Sem estoque!", ephemeral=True)
-            return
-
         await inter.response.defer(ephemeral=True)
         pag = criar_pagamento_pix_com_preco(inter.user.id, id_p, produtos[id_p]["preco"], produtos[id_p]["nome"])
-        
         if pag:
-            emb = discord.Embed(title=f"🛒 Pedido: {produtos[id_p]['nome']}", description=f"Valor: R$ {produtos[id_p]['preco']}", color=discord.Color.blue())
+            emb = discord.Embed(title=f"🛒 {produtos[id_p]['nome']}", color=discord.Color.blue())
             qr_f = None
             if pag["qr_code_base64"]:
                 qr_f = discord.File(BytesIO(base64.b64decode(pag["qr_code_base64"])), filename="pix.png")
                 emb.set_image(url="attachment://pix.png")
             await inter.followup.send(embed=emb, file=qr_f)
-            await inter.followup.send(f"**PIX Copia e Cola:**\n```\n{pag['qr_code']}\n```")
-        else:
-            await inter.followup.send("❌ Erro ao gerar PIX.")
-
+            await inter.followup.send(f"**PIX:**\n```\n{pag['qr_code']}\n```")
     view = discord.ui.View()
     view.add_item(Dropdown())
     await interaction.channel.send(embed=embed, view=view)
-    await interaction.response.send_message("✅ Painel enviado!", ephemeral=True)
+    await interaction.response.send_message("✅ Painel enviado", ephemeral=True)
 
-# ===============================
-# START
-# ===============================
 if __name__ == "__main__":
-    # Rodar Flask em uma thread separada
-    t = threading.Thread(target=run_flask)
+    # Local run logic
+    t = threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=5000))
     t.daemon = True
     t.start()
-
-    # Rodar Bot
     bot.run(DISCORD_TOKEN)
