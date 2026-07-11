@@ -224,7 +224,10 @@ class VariacoesView(discord.ui.View):
     def __init__(self, produto_id: str, produto_nome: str, variacoes: list):
         super().__init__(timeout=300)
         self.produto_id, self.produto_nome, self.variacoes = produto_id, produto_nome, variacoes
-        options = [discord.SelectOption(label=v["nome"], description=f"R$ {v['preco']:.2f}", value=str(i)) for i, v in enumerate(variacoes)]
+        options = []
+        for i, v in enumerate(variacoes):
+            qtd = verificar_estoque(produto_id, v["nome"])
+            options.append(discord.SelectOption(label=v["nome"], description=f"R$ {v['preco']:.2f} | Estoque: {qtd}", value=str(i)))
         select = discord.ui.Select(placeholder="Escolha uma opção...", options=options)
         select.callback = self.select_callback
         self.add_item(select)
@@ -437,7 +440,9 @@ async def configurar_produto(interaction: discord.Interaction, produto_id: str, 
     canal = discord.utils.get(interaction.guild.channels, name=nome_canal) or await interaction.guild.create_text_channel(nome_canal)
     emb = discord.Embed(title=f"⚡ {p['nome']}", description=p['descricao'].replace('|', '\n✅ '), color=0xffa500)
     if p.get('imagem'): emb.set_image(url=p['imagem'])
-    emb.add_field(name="💰 Valor", value=f"R$ {p['preco']:.2f}")
+    emb.add_field(name="💰 Valor", value=f"R$ {p['preco']:.2f}", inline=True)
+    qtd = verificar_estoque(produto_id)
+    emb.add_field(name="📦 Estoque", value=f"{qtd}", inline=True)
     await canal.purge(limit=5)
     await canal.send(embed=emb, view=ProdutoCompraView(produto_id, p['nome'], p.get('variacoes')))
     await interaction.followup.send("✅ Configurado!", ephemeral=True)
@@ -450,7 +455,9 @@ async def sincronizar_canal(interaction: discord.Interaction, produto_id: str):
     if p:
         emb = discord.Embed(title=f"⚡ {p['nome']}", description=p['descricao'].replace('|', '\n✅ '), color=0xffa500)
         if p.get('imagem'): emb.set_image(url=p['imagem'])
-        emb.add_field(name="💰 Valor", value=f"R$ {p['preco']:.2f}")
+        emb.add_field(name="💰 Valor", value=f"R$ {p['preco']:.2f}", inline=True)
+        qtd = verificar_estoque(produto_id)
+        emb.add_field(name="📦 Estoque", value=f"{qtd}", inline=True)
         await interaction.channel.purge(limit=5)
         await interaction.channel.send(embed=emb, view=ProdutoCompraView(produto_id, p['nome'], p.get('variacoes')))
         await interaction.followup.send("✅ Sincronizado!", ephemeral=True)
