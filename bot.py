@@ -170,6 +170,8 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
     try:
         canal_pagos = bot.get_channel(CANAL_PAGOS)
         if canal_pagos:
+            print(f"DEBUG: Canal de pagamentos aprovados encontrado: {CANAL_PAGOS}")
+
             embed = discord.Embed(title="✅ PAGAMENTO CONFIRMADO", color=0x00ff88, timestamp=datetime.now())
             embed.add_field(name="Cliente", value=user.mention, inline=True)
             embed.add_field(name="Produto", value=produto_nome, inline=True)
@@ -188,6 +190,8 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
                 except: pass
             del carrinhos_ativos[str(pagamento_id)]
     except Exception as e: print(f"❌ Erro log pagos: {e}")
+        print(f"DEBUG: Erro ao enviar log para o canal de pagamentos aprovados. Canal ID: {CANAL_PAGOS}")
+
 
 # ===============================
 # CLASSES UI (BOTÕES, MODAIS, VIEWS)
@@ -494,6 +498,8 @@ def webhook():
     data = request.json or request.form.to_dict()
     pid = data.get('data', {}).get('id') or data.get('id')
     if pid:
+        print(f"DEBUG: Webhook recebido para payment_id: {pid}")
+
         with webhook_lock:
             if str(pid) not in pagamentos_processados:
                 asyncio.run_coroutine_threadsafe(processar_pagamento(pid), bot.loop)
@@ -525,8 +531,10 @@ async def processar_pagamento(payment_id):
                             await log_pagamento_confirmado(user, p_info['nome'], p_data.get('transaction_amount', 0), payment_id, item)
                         else:
                             await user.send("✅ **Pagamento confirmado!**\n⚠️ Estoque vazio, um administrador entregará em breve.")
+                            await log_pagamento_confirmado(user, p_info["nome"], p_data.get("transaction_amount", 0), payment_id, "Estoque vazio / Entrega pendente")
                     else:
                         await user.send("✅ **Pagamento confirmado!**\n⏳ Produto de entrega manual, aguarde um administrador.")
+                        await log_pagamento_confirmado(user, p_info["nome"], p_data.get("transaction_amount", 0), payment_id, "Entrega manual / Pendente")
     except Exception as e: print(f"❌ Erro webhook: {e}")
 
 # ===============================
