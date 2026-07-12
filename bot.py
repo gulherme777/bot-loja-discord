@@ -189,7 +189,8 @@ async def log_pagamento_confirmado(user, produto_nome, valor, pagamento_id, item
                     await msg.edit(embed=emb)
                 except: pass
             del carrinhos_ativos[str(pagamento_id)]
-    except Exception as e: print(f"❌ Erro log pagos: {e}")
+    except Exception as e:
+        print(f"❌ Erro log pagos: {e}")
         print(f"DEBUG: Erro ao enviar log para o canal de pagamentos aprovados. Canal ID: {CANAL_PAGOS}")
 
 
