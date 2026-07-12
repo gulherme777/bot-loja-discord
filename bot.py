@@ -21,7 +21,7 @@ print("🔧 Iniciando bot da NOVA LOJA (Versão Completa)...")
 # ===============================
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", os.environ.get("DISCORD_TOKEN_G7", ""))
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://bot-discord-loja-eg7u.onrender.com/webhook")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://bot-loja-discord-jty5.onrender.com/webhook")
 
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
 ARQUIVO_ESTOQUE_JSON = "estoque.json"
@@ -493,6 +493,10 @@ async def backup_produtos(interaction: discord.Interaction):
 # WEBHOOK SERVER
 # ===============================
 flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "Bot Online", 200
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
