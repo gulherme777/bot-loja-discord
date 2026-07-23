@@ -14,14 +14,16 @@ from datetime import datetime
 from io import BytesIO
 import pyotp
 
-print("🔧 Iniciando bot da NOVA LOJA (Versão Completa)...")
+print("🔧 Iniciando bot da NOVA LOJA...")
 
-# ===============================
-# CONFIG (TUDO VIA VARIÁVEIS DE AMBIENTE)
-# ===============================
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", os.environ.get("DISCORD_TOKEN_G7", ""))
+# Pega o token de qualquer uma das variáveis
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN_G7") or os.environ.get("DISCORD_TOKEN")
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://bot-loja-discord-jty5.onrender.com/webhook")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+
+if not DISCORD_TOKEN:
+    print("❌ CRÍTICO: Nenhum token de bot encontrado nas variáveis de ambiente!")
+
 
 ARQUIVO_PRODUTOS_JSON = "produtos.json"
 ARQUIVO_ESTOQUE_JSON = "estoque.json"
