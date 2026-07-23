@@ -1,6 +1,9 @@
-discord.py==2.4.0
-Flask==3.0.3
-mercadopago==3.0.0
-pyotp==2.9.0
-hypercorn==0.16.0
-requests==2.32.4
+discord.py
+flask
+mercadopago
+pyotp
+requests
+aiohttp
+python-dotenv
+pillow
+qrcode

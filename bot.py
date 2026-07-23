@@ -30,9 +30,9 @@ ARQUIVO_ESTOQUE_JSON = "estoque.json"
 ARQUIVO_PAGAMENTOS_PROCESSADOS = "pagamentos.json"
 
 # ========== CONFIGURAÇÕES DA LOJA ==========
-MEU_ID = 1286512677958713344  # Substitua pelo seu ID se necessário
-CANAL_CARRINHOS = 1521749470075682856
-CANAL_PAGOS = 1521749470075682859
+MEU_ID = int(os.environ.get("DONO_ID", "1516951987868925983"))  # Substitua pelo seu ID se necessário
+CANAL_CARRINHOS = int(os.environ.get("CANAL_CARRINHOS", "1516955638930870365"))
+CANAL_PAGOS = int(os.environ.get("CANAL_PAGOS", "1516955638930870366"))
 CARGO_ADMIN = 1286512677958713344 # Pode ser ID de cargo ou usuário
 
 carrinhos_ativos = {}
@@ -548,7 +548,7 @@ async def processar_pagamento(payment_id):
 # START
 # ===============================
 if __name__ == "__main__":
-    t = threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=5000))
+    t = threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))))
     t.daemon = True
     t.start()
     bot.run(DISCORD_TOKEN)
