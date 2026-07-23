@@ -1,43 +1,21 @@
 import os
-import sys
 import threading
-import time
+from bot import bot, flask_app
 
-print("🚀 Iniciando Bot no Render...")
-
-# 🔥 USA DISCORD_TOKEN_G7 (igual está no Render)
-token = os.environ.get("DISCORD_TOKEN_G7", "")
-
-if not token:
-    print("❌ ERRO: DISCORD_TOKEN_G7 não configurado!")
-    print("🔍 Variáveis disponíveis:")
-    for key in os.environ.keys():
-        if "TOKEN" in key or "DISCORD" in key:
-            print(f"  - {key}: {'CONFIGURADO' if os.environ.get(key) else 'VAZIO'}")
-    sys.exit(1)
-
-print("✅ Token encontrado!")
-
-try:
-    from bot import bot, flask_app
-    print("✅ Bot e Flask importados com sucesso!")
-except ImportError as e:
-    print(f"❌ Erro ao importar: {e}")
-    sys.exit(1)
+# Força o carregamento do token
+token = os.environ.get("DISCORD_TOKEN_G7") or os.environ.get("DISCORD_TOKEN")
 
 def run_flask():
     port = int(os.environ.get("PORT", 5000))
-    flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    print(f"✅ Servidor Web rodando na porta {port}")
+    flask_app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    print(f"✅ Servidor Flask rodando na porta {os.environ.get('PORT', 5000)}")
-    print("🔄 Iniciando bot Discord...")
-    try:
+    # Inicia o Flask em segundo plano
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    print("🔄 Conectando ao Discord...")
+    if token:
         bot.run(token)
-    except Exception as e:
-        print(f"❌ Erro no bot: {e}")
-        while True:
-            time.sleep(10)
-            print("🔄 Bot caiu, aguardando...")
+    else:
+        print("❌ Erro: DISCORD_TOKEN não configurado no Render!")
