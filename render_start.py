@@ -20,8 +20,15 @@ if __name__ == "__main__":
     print("🔄 Conectando ao Discord...")
     if token:
         try:
+            # O bot.run() é bloqueante. Se ele falhar, o script continua.
             bot.run(token)
         except Exception as e:
-            print(f"❌ Erro ao iniciar o bot: {e}")
+            print(f"❌ Erro crítico no bot: {e}")
     else:
         print("❌ Erro: DISCORD_TOKEN ou DISCORD_TOKEN_G7 não configurado no Render!")
+
+    # Mantém o processo vivo caso o bot caia ou ocorra um erro de conexão
+    import time
+    print("⚠️ O processo principal continua ativo para evitar reinicialização infinita do Render.")
+    while True:
+        time.sleep(3600)

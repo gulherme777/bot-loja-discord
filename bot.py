@@ -547,13 +547,15 @@ async def processar_pagamento(payment_id):
 # ===============================
 # START
 # ===============================
-if __name__ == "__main__":
-    # Quando executado diretamente, usa a porta padrão do Render ou 10000
+def run_everything():
     port = int(os.environ.get("PORT", 10000))
-    t = threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=port))
+    t = threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=port, threaded=True))
     t.daemon = True
     t.start()
     if DISCORD_TOKEN:
         bot.run(DISCORD_TOKEN)
     else:
         print("❌ Erro: Token não encontrado.")
+
+if __name__ == "__main__":
+    run_everything()
